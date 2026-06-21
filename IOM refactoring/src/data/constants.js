@@ -1,0 +1,17 @@
+export const SAVE_KEY = "iom_save_v1";
+export const ESSENTIA_TYPES = ["Light","Matter","Life","Kinetic","Primal"];
+export const SECTORS = ["Docks","Backstreets","Old Town","Markets","Industrial Quarter","Park District","Underbridge"];
+export const SHIFTS = ["morning","afternoon","night"];
+export const FACTIONS = ["House Ashford","House Norrington","Tyr Corporation","Linford Corporation"];
+export const PLAYER_FACTION = "Player's Faction";
+export const RANKS = ["D-","D","D+","C-","C","C+","B-","B","B+","A-","A","A+"];
+export const RANK_WEIGHTS = [22,18,14,11,9,7,6,5,4,2,1.4,0.6];
+export const RANK_ESSENTIA_YIELD = {"D-":1,"D":2,"D+":5,"C-":10,"C":15,"C+":20,"B-":25,"B":30,"B+":35,"A-":40,"A":45,"A+":50};
+export const RANK_SELL_PRICE = {"D-":150,"D":200,"D+":500,"C-":1500,"C":3000,"C+":5000,"B-":8000,"B":12000,"B+":18000,"A-":28000,"A":45000,"A+":75000};
+export const DAILY_LIVING_COST = 50;
+export const WELL_REGEN_RATE = 0.20;
+export const FAVOUR_MIN_RELATION = -20;
+export const RECRUIT_MIN_RELATION = 50;
+export const ESSENTIA_BASE_PRICE = { Light:100, Matter:120, Life:120, Kinetic:100, Primal:100 };
+export const SIGIL_SLOTS = ["hand1","hand2","neck"];
+export const SLOT_LABELS = { hand1:"Hand Slot 1", hand2:"Hand Slot 2", neck:"Neck / Body" };

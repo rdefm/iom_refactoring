@@ -659,6 +659,7 @@ input[type="file"] { display: none; }
   max-width: var(--max-w);
   max-height: 88vh;
   overflow-y: auto;
+  position: relative;       /* ← FIXED: establishes stacking context */
 }
 .event-sheet h2 {
   margin: 0 0 4px;
@@ -678,11 +679,13 @@ input[type="file"] { display: none; }
 
 /* ── Event image banner ── */
 .event-image-wrap {
-  margin: -20px -16px 16px -16px; /* bleed to sheet edges, matching sheet padding */
-  border-radius: 16px 16px 0 0;   /* match sheet top corners */
+  margin: -20px -16px 16px -16px;
+  border-radius: 16px 16px 0 0;
   overflow: hidden;
   height: 185px;
   flex-shrink: 0;
+  position: relative;       /* ← FIXED: keeps image in its own stacking layer */
+  z-index: 0;               /* ← FIXED: prevents image bleeding over buttons */
 }
 .event-image {
   width: 100%;
@@ -921,6 +924,7 @@ input[type="file"] { display: none; }
   font-size: .85rem;
   text-align: center;
 }
+
 /* ══════════════════════════════════════════════
    COMBAT MODAL
    ══════════════════════════════════════════════ */

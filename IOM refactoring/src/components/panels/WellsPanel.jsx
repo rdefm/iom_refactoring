@@ -94,21 +94,43 @@ export function WellsPanel({ openModal }) {
                 <button className="small" style={{borderColor:"var(--kinetic)",color:"var(--kinetic)"}}
                   disabled={(w.currentEssentia||0)<1}
                   onClick={()=>{
-                    const tier = w.security.tier||"none";
-                    if(tier==="none"){
-                      // No guards — drain directly (no combat)
-                      const gained = Math.floor(w.currentEssentia||0);
-                      if(gained<=0){
-                        toast("Nothing to drain — the well is empty.");
-                        return;
-                      }
-                      dispatch({ type:ACT.DRAIN_WELL, wellId:w.id });
+                    if((w.currentEssentia||0) < 1) {
+                      toast("Nothing to drain — the well is empty.");
                       return;
                     }
+                    // Player-owned wells: always drain directly — the guards are yours.
+                    dispatch({ type:ACT.DRAIN_WELL, wellId:w.id });
+                  }}>
+                  ⚡ {(w.currentEssentia||0)<1?"Empty":"Drain"}
+                </button>
+              )}
+              {!isOwned && w.security.tier!=="none" && !w.security.downed && (
+                <button className="small" style={{borderColor:"var(--kinetic)",color:"var(--kinetic)"}}
+                  disabled={(w.currentEssentia||0)<1}
+                  onClick={()=>{
+                    if((w.currentEssentia||0) < 1) {
+                      toast("Nothing to drain — the well is empty.");
+                      return;
+                    }
+                    // Hostile well — fight the guards first
+                    const tier = w.security.tier;
                     const pool = DRAIN_ENEMIES[tier]||DRAIN_ENEMIES.light;
                     const template = pool[Math.floor(Math.random()*pool.length)];
                     const newCombat = initCombat(state, template, { type:"drain", wellId:w.id, securityTier:tier });
                     setCombat(newCombat);
+                  }}>
+                  ⚡ {(w.currentEssentia||0)<1?"Empty":"Drain (guarded)"}
+                </button>
+              )}
+              {!isOwned && (w.security.tier==="none" || w.security.downed) && (
+                <button className="small" style={{borderColor:"var(--kinetic)",color:"var(--kinetic)"}}
+                  disabled={(w.currentEssentia||0)<1}
+                  onClick={()=>{
+                    if((w.currentEssentia||0) < 1) {
+                      toast("Nothing to drain — the well is empty.");
+                      return;
+                    }
+                    dispatch({ type:ACT.DRAIN_WELL, wellId:w.id });
                   }}>
                   ⚡ {(w.currentEssentia||0)<1?"Empty":"Drain"}
                 </button>

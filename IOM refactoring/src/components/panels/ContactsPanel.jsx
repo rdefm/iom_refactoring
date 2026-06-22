@@ -13,6 +13,7 @@ export function ContactsPanel({ openModal }) {
   function openEvent(pending) {
     if(!pending) return;
     dispatch({ type:ACT.OPEN_EVENT, eventId:pending.eventId, ctx:{} });
+    openModal && openModal("contactEvent", { eventId:pending.eventId });
   }
 
   function recruit(contactId) {

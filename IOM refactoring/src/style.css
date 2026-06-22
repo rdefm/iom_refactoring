@@ -821,7 +821,7 @@ input[type="file"] { display: none; }
 .shop-item .info b { display: block; font-size: .85rem; }
 .shop-item .info .desc { color: var(--muted); font-size: .72rem; margin: 3px 0; line-height: 1.4; }
 .shop-item .info .stats { font-size: .72rem; color: var(--warn); margin-top: 2px; }
-.shop-item .buy-btn { flex-shrink: 0; }
+.shop-item .buy-btn { flex-shrink: 0; width: auto; align-self: center; white-space: nowrap; }
 
 .weapon-tag {
   font-size: .65rem;

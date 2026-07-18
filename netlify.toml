@@ -1,7 +1,3 @@
 [build]
-  base = "vein"
   publish = "."
-  command = "echo 'Vein is a static app - no build step'"
-
-[build.environment]
-  NODE_VERSION = "20"
+  command = "echo 'Vein is a static PWA - no build step'"

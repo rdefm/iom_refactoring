@@ -1,8 +1,0 @@
-{
-  "appId": "com.iom.app",
-  "appName": "Inheritance of Magic",
-  "webDir": "dist",
-  "server": {
-    "androidScheme": "https"
-  }
-}

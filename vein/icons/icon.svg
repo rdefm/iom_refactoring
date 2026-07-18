@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#1a1a1a"/>
+  <!-- vein branches, amber glow under the city -->
+  <g stroke="#c8873a" stroke-width="14" stroke-linecap="round" fill="none" opacity="0.55">
+    <path d="M256 88 C 240 180, 200 220, 168 300 C 150 346, 148 390, 156 424"/>
+    <path d="M256 88 C 272 180, 312 220, 344 300 C 362 346, 364 390, 356 424"/>
+    <path d="M212 240 C 190 268, 178 296, 172 320"/>
+    <path d="M300 240 C 322 268, 334 296, 340 320"/>
+  </g>
+  <text x="256" y="330" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="280" fill="#f0ece2">V</text>
+</svg>

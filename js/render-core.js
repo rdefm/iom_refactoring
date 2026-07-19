@@ -36,14 +36,88 @@ function renderTitleScreen() {
       <div class="title-tagline">Source the ore. Mind your veins. Don't get robbed.<br>Easier said than done.</div>
     </div>
     <div class="title-starts">
-      <button class="title-start-btn title-start-main" onclick="startTutorial()">
+      <button class="title-start-btn title-start-main" onclick="goToAffinitySelect()">
         <div><div>New Game</div><span class="title-start-label">Tuesday night, Whitechapel</span></div><span style="font-size:18px">›</span>
       </button>
       <button class="title-start-btn title-start-debug" onclick="startDebug()">
         <div><div>Debug Start</div><span class="title-start-label">All flags · £1m · 3 veins · 20× ore · 5 pearls · Crafting Lv3</span></div><span style="font-size:16px;opacity:0.4">›</span>
       </button>
     </div>
-    <div class="title-version">prototype v0.6 — M1: London Exists</div>
+    <div class="title-version">prototype v0.7 — M3: The Craft</div>
+  </div>`;
+}
+
+// ============================================================
+// RENDER: AFFINITY SELECT (new game only)
+// ============================================================
+function renderAffinitySelectScreen() {
+  const presetCards = Object.values(AFFINITY_PRESETS).map(preset => `
+    <div class="action-card" onclick="previewAffinityPreset('${preset.id}')">
+      <div class="action-card-left">
+        <div class="action-card-title">${preset.name}</div>
+        <div class="action-card-sub">Attuned: ${ORE_TYPES[preset.attuned].symbol} ${ORE_TYPES[preset.attuned].name.replace(' Orichalchum','')} · Resistant: ${ORE_TYPES[preset.resistant].symbol} ${ORE_TYPES[preset.resistant].name.replace(' Orichalchum','')}</div>
+      </div>
+      <div class="action-card-arrow">›</div>
+    </div>`).join('');
+  return `<div class="screen-fade-enter" style="flex:1;display:flex;flex-direction:column;">
+    <div class="screen-header">
+      <div class="screen-header-titles">
+        <div class="screen-header-eyebrow">Before you go</div>
+        <div class="screen-header-title">Affinity</div>
+        <div class="screen-header-sub">Fixed at birth. Pick a stance, or leave it to chance.</div>
+      </div>
+    </div>
+    <div style="flex:1;padding:16px 18px;overflow-y:auto">
+      <div style="font-family:var(--font-body);font-size:14px;color:var(--slate);line-height:1.6;margin-bottom:14px">
+        Orichalchum runs in the blood before you ever touch a vein. One type sits right with you; one sits wrong. Everything else is neutral.
+      </div>
+      <div class="section-label">Presets</div>
+      ${presetCards}
+      <div class="section-label" style="margin-top:14px">Or</div>
+      <div class="action-card" onclick="rollAffinityRandom()" style="border-color:var(--amber)">
+        <div class="action-card-left">
+          <div class="action-card-title">🎲 See what the midwife says</div>
+          <div class="action-card-sub">Random roll. Small chance of an allergy — compensated, if it happens.</div>
+        </div>
+        <div class="action-card-arrow">›</div>
+      </div>
+    </div>
+  </div>`;
+}
+function renderAffinityPreviewModal(data) {
+  if (data.random) {
+    const r = gameState._pendingAffinityRoll;
+    if (!r) return '';
+    const attunedType = Object.keys(r.profile).find(k => r.profile[k] === 'attuned');
+    const resistType   = Object.keys(r.profile).find(k => r.profile[k] === 'resistant');
+    const allergicType = Object.keys(r.profile).find(k => r.profile[k] === 'allergic');
+    return `<div class="modal">
+      <div class="modal-title">${r.isAllergic ? '⚠ An allergy.' : 'The roll.'}</div>
+      <div class="modal-sub">
+        Attuned: <strong>${ORE_TYPES[attunedType].symbol} ${ORE_TYPES[attunedType].name.replace(' Orichalchum','')}</strong><br>
+        ${r.isAllergic
+          ? `Allergic: <strong>${ORE_TYPES[allergicType].symbol} ${ORE_TYPES[allergicType].name.replace(' Orichalchum','')}</strong> — can't use it on yourself. Cultivating and selling it is fine.<br>Compensated: <strong>+£${r.bonusCash}</strong> starting cash.`
+          : `Resistant: <strong>${ORE_TYPES[resistType].symbol} ${ORE_TYPES[resistType].name.replace(' Orichalchum','')}</strong>`}
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-amber" onclick="confirmAffinityRandom()">Begin →</button>
+        <button class="btn btn-secondary" onclick="closeModal()">Roll again later</button>
+      </div>
+    </div>`;
+  }
+  const preset = AFFINITY_PRESETS[data.presetId];
+  if (!preset) return '';
+  return `<div class="modal">
+    <div class="modal-title">${preset.name}</div>
+    <div class="modal-sub">${preset.blurb}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px">
+      <div class="vein-stat"><div class="vein-stat-label">Attuned</div><div class="vein-stat-value">${ORE_TYPES[preset.attuned].symbol} ${ORE_TYPES[preset.attuned].name.replace(' Orichalchum','')}</div></div>
+      <div class="vein-stat"><div class="vein-stat-label">Resistant</div><div class="vein-stat-value">${ORE_TYPES[preset.resistant].symbol} ${ORE_TYPES[preset.resistant].name.replace(' Orichalchum','')}</div></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-amber" onclick="confirmAffinityPreset('${preset.id}')">Begin →</button>
+      <button class="btn btn-secondary" onclick="closeModal()">Back</button>
+    </div>
   </div>`;
 }
 
@@ -387,8 +461,10 @@ function renderInventoryScreen() {
         </div>`;
       }).join('');
 
-  const equippedDevice = equippedDeviceId ? devicesCompleted.find(d => d.id === equippedDeviceId) : null;
-  const unequippedDevices = devicesCompleted.filter(d => d.id !== equippedDeviceId);
+  const combatDevices = devicesCompleted.filter(d => !DEVICE_TYPES[d.type]?.utility);
+  const utilityDevices = devicesCompleted.filter(d => DEVICE_TYPES[d.type]?.utility);
+  const equippedDevice = equippedDeviceId ? combatDevices.find(d => d.id === equippedDeviceId) : null;
+  const unequippedDevices = combatDevices.filter(d => d.id !== equippedDeviceId);
 
   const deviceSlotHTML = equippedDevice
     ? (() => {
@@ -428,12 +504,28 @@ function renderInventoryScreen() {
         </div>`;
       }).join('');
 
+  const utilityDeviceHTML = utilityDevices.length === 0 ? '' : `
+    <div class="section-label" style="margin:10px 0 6px">Utility devices</div>
+    ${utilityDevices.map(d => {
+      const dt = DEVICE_TYPES[d.type];
+      return `<div class="item-card" style="margin-bottom:8px" onclick="navigate('property')">
+        <div class="item-card-top">
+          <div class="item-card-icon">${dt.symbol}</div>
+          <div><div class="item-card-name">${dt.name} ${d.active?'<span class="pill pill-success">Active</span>':''}</div></div>
+        </div>
+        <div class="item-card-desc">${dt.description}</div>
+        <div style="font-family:var(--font-ui);font-size:11px;color:var(--amber);margin-top:4px">Manage on Your Property →</div>
+      </div>`;
+    }).join('')}
+  `;
+
   const equipHTML = `
     <div class="section-label" style="margin-bottom:6px">Weapon</div>
     ${weaponHTML}
     <div class="section-label" style="margin:10px 0 6px">Device</div>
     ${deviceSlotHTML}
     ${unequippedDeviceHTML}
+    ${utilityDeviceHTML}
     ${devicesCompleted.length === 0 && ownedItems.length === 0 ? '<div class="inv-empty">No equipment yet.</div>' : ''}
   `;
 

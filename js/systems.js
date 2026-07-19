@@ -14,9 +14,38 @@ function startTutorial() {
   gameState.currentScreen = 'intro';
   renderGame();
 }
+// === M3: AFFINITY SELECTION (new-game only) ===
+function goToAffinitySelect() { gameState.currentScreen = 'affinity_select'; renderGame(); }
+function previewAffinityPreset(presetId) { openModal('affinity_preview', { presetId }); }
+function confirmAffinityPreset(presetId) {
+  const preset = AFFINITY_PRESETS[presetId];
+  if (!preset) return;
+  gameState.player.affinities = buildAffinityProfile(preset.attuned, preset.resistant);
+  gameState.player.recipeState = {};
+  closeModal();
+  startTutorial();
+}
+function rollAffinityRandom() {
+  gameState._pendingAffinityRoll = rollRandomAffinityProfile();
+  openModal('affinity_preview', { random: true });
+  renderGame();
+}
+function confirmAffinityRandom() {
+  const r = gameState._pendingAffinityRoll;
+  if (!r) return;
+  gameState.player.affinities = r.profile;
+  gameState.player.recipeState = {};
+  if (r.bonusCash) gameState.player.cash += r.bonusCash;
+  gameState._pendingAffinityRoll = null;
+  closeModal();
+  startTutorial();
+}
 function startDebug() {
   const p = gameState.player;
   p.cash = 1000000; p.hp = 150; p.hpMax = 150; p.attackMin = 10; p.attackMax = 22;
+  p.affinities = buildAffinityProfile('time', 'emotion');
+  p.recipeState = { prophetsBreath:'known', pansPrank:'known', luckBeALady:'known' };
+  p.strainedEyesDays = 0;
   p.inventory.timePearl = 5; p.inventory.rewind = 3; p.craftingSkill = 3; p.craftingXP = 100;
   p.items = [{ id:'crowbar_1', type:'crowbar' }];
   ORE_TYPE_KEYS.forEach(k => { p.orichalchum[k] = 20; });
@@ -39,6 +68,9 @@ function startDebug() {
   // homeRaidEventSeen intentionally NOT set — set pending so event triggers on home screen
   gameState.flags.homeRaidEventPending = true;
   gameState.player.inventory.enhancementPowder=3;
+  gameState.player.inventory.blast=3; gameState.player.inventory.shield=3;
+  gameState.player.inventory.healingSalve=2; gameState.player.inventory.healingBurst=2;
+  gameState.player.inventory.prophetsBreath=2; gameState.player.inventory.pansPrank=2; gameState.player.inventory.luckBeALady=2;
   gameState.contacts.james.unlocked = true;
   gameState.contacts.archie.relation = 60;
   gameState.contacts.james.relation  = 40;
@@ -279,6 +311,9 @@ function getHomeRaidChance() {
   let chance = tier.raidBaseChance + (fx.homeRaid||0);
   // Security reduces chance
   gameState.home.security.forEach(sid => { chance -= HOME_SECURITY[sid]?.raidReduction||0; });
+  // Ward Stone stacks with installed security while active and fuelled
+  const wardStone = (gameState.player.devicesCompleted||[]).find(d => d.type === 'wardStone' && d.active);
+  if (wardStone) chance -= DEVICE_TYPES.wardStone.raidReduction;
   // More ore = more attractive
   const stored = Object.values(gameState.home.storedOre||{}).reduce((s,v)=>s+v,0);
   chance += stored * 0.001;
@@ -361,6 +396,12 @@ function getWorkshopBonus() {
 function dailyTick() {
   const day = gameState.world.day;
   tickBarometer(day);
+  // Ward Stone must resolve before today's raid roll so its reduction applies
+  processUtilityDevices(day);
+  if ((gameState.player.strainedEyesDays || 0) > 0) {
+    gameState.player.strainedEyesDays--;
+    if (gameState.player.strainedEyesDays === 0) pushNotification(`Your eyes have stopped aching. Strained Eyes has cleared.`);
+  }
   rollHomeRaid(day);
   const fx = getBarometerEffects();
   const DAILY_COST = Math.round(50 * (1 + (fx.dailyCost||0)));
@@ -804,9 +845,46 @@ function checkOreGoal() {
 }
 
 // === CRAFTING SYSTEM ===
+// === M3: AFFINITY EFFECT RESOLUTION PIPELINE ===
+// One seam every self-targeted and enemy-targeted typed effect routes
+// through, so affinities are written once (§17.4).
+function getStance(profile, oreType) { return (profile && profile[oreType]) || 'neutral'; }
+function isRecipeAttuned(recipeKey) {
+  const r = RECIPES[recipeKey];
+  return r.ingredients.some(ing => getStance(gameState.player.affinities, ing.type) === 'attuned');
+}
+// Self-targeted magnitude (heals, shields, evade, luck) — amplified if attuned,
+// dampened if resistant, blocked (and punished) if allergic. `types` is an
+// array so combination recipes (e.g. time+life) can be resolved in one call.
+function resolveSelfEffect(base, types) {
+  const profile = gameState.player.affinities || {};
+  if (types.some(t => getStance(profile, t) === 'allergic')) return { blocked: true, magnitude: 0 };
+  const mults = types.map(t => AFFINITY_STANCES[getStance(profile, t)].selfMult);
+  const mult = mults.reduce((s, v) => s + v, 0) / mults.length;
+  return { blocked: false, magnitude: Math.round(base * mult) };
+}
+// Enemy-targeted magnitude/chance (freeze turns, Pan's Prank potency) —
+// enemies carry their own affinity profile on the template.
+function resolveEnemyEffect(base, oreType, enemy) {
+  const stance = getStance(enemy.affinities, oreType);
+  if (stance === 'allergic') return base * 1.5; // rare on enemies, but hits harder if it lands
+  if (stance === 'resistant') return base * 0.5;
+  if (stance === 'attuned') return base * 1.25; // amplified on them too — it's still "their" element
+  return base;
+}
+function affinityLine(types) {
+  const profile = gameState.player.affinities || {};
+  const stances = types.map(t => getStance(profile, t));
+  if (stances.includes('allergic')) return ' You’re allergic to that. Should’ve thought of that first.';
+  if (stances.includes('attuned'))  return ' It sits right with you.';
+  if (stances.includes('resistant'))return ' Your body mostly shrugs it off.';
+  return '';
+}
+
 function getCraftingSuccessChance(recipeKey) {
   const r = RECIPES[recipeKey]; const sk = gameState.player.craftingSkill;
-  return Math.min(0.95, r.baseSuccess + (sk - 1) * 0.13 + getWorkshopBonus());
+  const attunedBonus = isRecipeAttuned(recipeKey) ? 0.10 : 0;
+  return Math.min(0.95, r.baseSuccess + (sk - 1) * 0.13 + getWorkshopBonus() + attunedBonus);
 }
 function getCraftingCalcCost(recipeKey) {
   const r = RECIPES[recipeKey]; const sk = gameState.player.craftingSkill;
@@ -816,16 +894,28 @@ function getCraftingEffectPower(recipeKey) {
   const r = RECIPES[recipeKey]; const sk = gameState.player.craftingSkill;
   return r.effectPower[sk] || 1;
 }
+function isRecipeKnown(recipeKey) {
+  if (!DISCOVERABLE_RECIPES.includes(recipeKey)) return true; // taught recipes are ungated here
+  return (gameState.player.recipeState || {})[recipeKey] === 'known';
+}
 function canCraft(recipeKey) {
+  if (!isRecipeKnown(recipeKey)) return false;
   const r = RECIPES[recipeKey]; const cost = getCraftingCalcCost(recipeKey);
   return r.ingredients.every(ing => (gameState.player.orichalchum[ing.type]||0) >= cost);
+}
+function maybeInflictStrainedEyes() {
+  if ((gameState.player.strainedEyesDays || 0) > 0) return;
+  if (Math.random() >= STRAINED_EYES_CHANCE) return;
+  gameState.player.strainedEyesDays = STRAINED_EYES_DAYS;
+  pushNotification(`Your eyes ache from the close work. Strained Eyes: -10% crafting success for a few days.`);
 }
 function attemptCraft(recipeKey) {
   if (!canCraft(recipeKey)) return;
   const r = RECIPES[recipeKey]; const cost = getCraftingCalcCost(recipeKey);
   // Deduct calc regardless of outcome
   r.ingredients.forEach(ing => { gameState.player.orichalchum[ing.type] = Math.max(0,(gameState.player.orichalchum[ing.type]||0)-cost); });
-  const success = Math.random() < getCraftingSuccessChance(recipeKey);
+  const eyesPenalty = (gameState.player.strainedEyesDays || 0) > 0 ? STRAINED_EYES_PENALTY : 0;
+  const success = Math.random() < Math.max(0.03, getCraftingSuccessChance(recipeKey) - eyesPenalty);
   if (success) {
     const power = getCraftingEffectPower(recipeKey);
     // recipeKey is also the inventory key for every consumable
@@ -834,7 +924,71 @@ function attemptCraft(recipeKey) {
     openModal('craft_result', { recipeKey, success:true, power });
   } else {
     awardCraftingXP(Math.floor(r.xpReward / 3)); // partial XP for failed attempt
+    maybeInflictStrainedEyes();
     openModal('craft_result', { recipeKey, success:false, power:0 });
+  }
+  renderGame();
+}
+
+// === M3: CRAFTING SCREEN TYPE-LINK PICKER ===
+function selectCraftType(t) {
+  const sel = gameState.craftPickTypes || [];
+  if (sel.length === 1 && sel[0] === t) gameState.craftPickTypes = [];
+  else if (sel.length === 1 && sel[0] !== t) gameState.craftPickTypes = [sel[0], t];
+  else gameState.craftPickTypes = [t];
+  renderGame();
+}
+function selectCraftPair(a, b) { gameState.craftPickTypes = [a, b]; renderGame(); }
+function recipesMatchingTypes(types) {
+  const sorted = [...types].sort().join('+');
+  return Object.keys(RECIPES).filter(k => recipeIngredientTypes(k).sort().join('+') === sorted);
+}
+// 'known' | 'hinted' | 'unknown' (discoverable, not yet found) | 'locked' (taught, not yet taught)
+function getRecipeDisplayState(key) {
+  if (DISCOVERABLE_RECIPES.includes(key)) return getRecipeState(key);
+  const flag = key === 'enhancementPowder' ? 'enhancementPowderUnlocked' : 'craftingUnlocked';
+  return gameState.flags[flag] ? 'known' : 'locked';
+}
+
+// === M3: DISCOVERY-BY-EXPERIMENTATION ===
+function recipeIngredientTypes(recipeKey) { return RECIPES[recipeKey].ingredients.map(i => i.type); }
+function findDiscoverableRecipe(types) {
+  const sorted = [...types].sort().join('+');
+  return DISCOVERABLE_RECIPES.find(k => recipeIngredientTypes(k).sort().join('+') === sorted);
+}
+function getRecipeState(recipeKey) { return (gameState.player.recipeState || {})[recipeKey] || 'unknown'; }
+function canAffordDiscover(types) {
+  return types.every(t => (gameState.player.orichalchum[t] || 0) >= DISCOVER_ORE_COST);
+}
+function attemptDiscover(recipeKey) {
+  if (isTimeExhausted()) return;
+  const types = recipeIngredientTypes(recipeKey);
+  if (!canAffordDiscover(types)) return;
+  advanceTimeBlock();
+  types.forEach(t => { gameState.player.orichalchum[t] = Math.max(0, (gameState.player.orichalchum[t]||0) - DISCOVER_ORE_COST); });
+  if (!gameState.player.recipeState) gameState.player.recipeState = {};
+  const before = getRecipeState(recipeKey);
+  const chance = getDiscoverChance(gameState.player.craftingSkill);
+  const success = Math.random() < chance;
+  awardCraftingXP(10);
+  if (success) {
+    const after = before === 'unknown' ? 'hinted' : 'known';
+    gameState.player.recipeState[recipeKey] = after;
+    if (after === 'known') {
+      openModal('discover_result', { recipeKey, outcome:'known' });
+    } else {
+      openModal('discover_result', { recipeKey, outcome:'hinted' });
+    }
+  } else {
+    const minorIncident = Math.random() < 0.15;
+    if (minorIncident) {
+      const t = randFrom(types);
+      const lost = Math.min(gameState.player.orichalchum[t]||0, rand(3, 8));
+      gameState.player.orichalchum[t] = Math.max(0, (gameState.player.orichalchum[t]||0) - lost);
+      openModal('discover_result', { recipeKey, outcome:'incident', lost, lostType:t });
+    } else {
+      openModal('discover_result', { recipeKey, outcome:'fail' });
+    }
   }
   renderGame();
 }
@@ -884,10 +1038,86 @@ function attemptDeviceBuild(deviceId) {
 function completeDevice(device) {
   const p = gameState.player;
   p.devicesInProgress = p.devicesInProgress.filter(d => d.id !== device.id);
-  p.devicesCompleted.push({ id:device.id, type:device.type, level:1, xp:0, chargesPerDay:1, chargesUsedToday:0, lastResetDay:gameState.world.day });
   const dt = DEVICE_TYPES[device.type];
-  pushNotification(`${dt.name} complete. Check your equipment.`);
+  const built = { id:device.id, type:device.type, level:1, xp:0, chargesPerDay:1, chargesUsedToday:0, lastResetDay:gameState.world.day };
+  if (dt.utility) { built.active = false; built.targetVeinId = null; }
+  p.devicesCompleted.push(built);
+  pushNotification(dt.utility ? `${dt.name} complete. Manage it from your Property page.` : `${dt.name} complete. Check your equipment.`);
   renderGame();
+}
+
+// === M3: UTILITY DEVICE FUEL & ACTIONS ===
+function resolveDeviceFuelCost(fuelType, baseFuel) {
+  const attuned = getStance(gameState.player.affinities, fuelType) === 'attuned';
+  return Math.max(1, Math.round(baseFuel * (attuned ? 0.9 : 1)));
+}
+function toggleWardStone(deviceId) {
+  const d = (gameState.player.devicesCompleted||[]).find(x => x.id === deviceId && x.type === 'wardStone');
+  if (!d) return;
+  d.active = !d.active;
+  pushNotification(d.active ? `Ward Stone active. Draws physics calc daily.` : `Ward Stone switched off.`);
+  renderGame();
+}
+function assignCultivatorsStill(deviceId, veinId) {
+  const d = (gameState.player.devicesCompleted||[]).find(x => x.id === deviceId && x.type === 'cultivatorsStill');
+  if (!d) return;
+  d.targetVeinId = veinId || null;
+  d.active = !!veinId;
+  pushNotification(veinId ? `Cultivator's Still assigned. It'll tend that vein daily while fuel holds.` : `Cultivator's Still unassigned.`);
+  renderGame();
+}
+function useAssayGlass(deviceId, districtId) {
+  const d = (gameState.player.devicesCompleted||[]).find(x => x.id === deviceId && x.type === 'assayGlass');
+  const dt = DEVICE_TYPES.assayGlass;
+  if (!d) return;
+  const fuel = resolveDeviceFuelCost(dt.calcType, dt.fuelPerUse);
+  if ((gameState.player.orichalchum[dt.calcType]||0) < fuel) { pushNotification(`Not enough fate calc to use the Assay Glass.`); renderGame(); return; }
+  gameState.player.orichalchum[dt.calcType] -= fuel;
+  const tier = rollSiteTier(districtId);
+  awardDeviceXP(d, 8);
+  openModal('assay_result', { districtId, tier });
+  renderGame();
+}
+function useOcularLathe(deviceId) {
+  const d = (gameState.player.devicesCompleted||[]).find(x => x.id === deviceId && x.type === 'ocularLathe');
+  const dt = DEVICE_TYPES.ocularLathe;
+  if (!d) return;
+  if ((gameState.player.strainedEyesDays||0) <= 0) { pushNotification(`Nothing to cure right now.`); renderGame(); return; }
+  const fuel = resolveDeviceFuelCost(dt.calcType, dt.fuelPerUse);
+  if ((gameState.player.orichalchum[dt.calcType]||0) < fuel) { pushNotification(`Not enough life calc to use the Ocular Lathe.`); renderGame(); return; }
+  gameState.player.orichalchum[dt.calcType] -= fuel;
+  gameState.player.strainedEyesDays = 0;
+  awardDeviceXP(d, 8);
+  pushNotification(`The Ocular Lathe does its work. Strained Eyes cured.`);
+  renderGame();
+}
+function processUtilityDevices(day) {
+  (gameState.player.devicesCompleted||[]).forEach(d => {
+    const dt = DEVICE_TYPES[d.type];
+    if (!dt || !dt.utility || !d.active) return;
+    if (dt.useType === 'passive-raid') {
+      const fuel = resolveDeviceFuelCost(dt.calcType, dt.dailyFuel);
+      if ((gameState.player.orichalchum[dt.calcType]||0) >= fuel) {
+        gameState.player.orichalchum[dt.calcType] -= fuel;
+      } else {
+        d.active = false;
+        pushNotification(`Ward Stone ran dry and switched off. Refuel it (physics calc) to bring it back.`);
+      }
+    } else if (dt.useType === 'passive-cultivate') {
+      const vein = gameState.player.veins.find(v => v.id === d.targetVeinId);
+      if (!vein) { d.active = false; d.targetVeinId = null; return; }
+      const fuel = resolveDeviceFuelCost(dt.calcType, dt.dailyFuel);
+      if ((gameState.player.orichalchum[dt.calcType]||0) >= fuel) {
+        gameState.player.orichalchum[dt.calcType] -= fuel;
+        const ld = VEIN_LEVELS[vein.level];
+        vein.devBar = (vein.devBar||0) + dt.devTick;
+        if (vein.devBar >= ld.devBarMax && vein.level < getVeinMaxLevel(vein)) levelUpVein(vein);
+      } else {
+        d.active = false;
+        pushNotification(`Cultivator's Still ran dry and stopped. Refuel it (life calc) to resume.`);
+      }
+    }
+  });
 }
 function breakDevice(deviceId) {
   gameState.player.devicesInProgress = gameState.player.devicesInProgress.filter(d => d.id !== deviceId);
@@ -1484,7 +1714,7 @@ function beginEncounter({ context, enemies, veinId = null, veinRef = null, onWin
   gameState.combat = {
     active: true, context, phase: skipOpener ? 'fight' : 'opener', veinId,
     enemies, log: [intro], outcome: null, onWin, turn: 0,
-    player: { shield: 0, evadeTurns: 0, evadeChance: 0, motionTurns: 0, motionPower: 0, strengthNext: 0 },
+    player: { shield: 0, evadeTurns: 0, evadeChance: 0, motionTurns: 0, motionPower: 0, strengthNext: 0, luckyTurn: false, luckyBonus: 0 },
     snapshots: [], pendingReinforce: null,
   };
   gameState.combat._veinRef = veinRef; // transient (not snapshotted)
@@ -1633,23 +1863,28 @@ function combatPlayerAttack() {
   if (!c.active || c.outcome || c.phase !== 'fight') return;
   pushCombatSnapshot();
   let attacks = 1;
-  if (p.motionTurns > 0) {
-    attacks = p.motionPower >= 3 ? 3 : 2;
+  if (c.player.motionTurns > 0) {
+    attacks = c.player.motionPower >= 3 ? 3 : 2;
     c.log.push(`Enhancement powder — you move ${attacks === 3 ? 'three times' : 'twice'} as fast.`);
   }
   for (let i = 0; i < attacks; i++) {
     const tgt = c.enemies.find(e => e.hp > 0);
     if (!tgt) break;
     const atk = getAttackRange();
-    let dmg = Math.round(rand(atk.min, atk.max) * (1 + fieldcraftBonus())) + (p.strengthNext || 0);
+    const lucky = i === 0 && c.player.luckyTurn;
+    let dmg = lucky
+      ? Math.round(atk.max * (1 + fieldcraftBonus())) + (c.player.luckyBonus || 0)
+      : Math.round(rand(atk.min, atk.max) * (1 + fieldcraftBonus()));
+    dmg += (c.player.strengthNext || 0);
     const braced = tgt.intent?.id === 'brace';
     if (braced) dmg = hasManeuver('press') ? Math.round(dmg * 1.2) : Math.round(dmg * 0.5);
     tgt.hp = Math.max(0, tgt.hp - dmg);
-    c.log.push(`You attack${attacks > 1 ? ` (hit ${i + 1})` : ''} — ${dmg} damage${braced ? (hasManeuver('press') ? ' (Press — through the brace)' : ' (they braced — halved)') : ''}. ${tgt.name}: ${tgt.hp}/${tgt.hpMax}.`);
+    c.log.push(`You attack${attacks > 1 ? ` (hit ${i + 1})` : ''}${lucky ? ' — luck holds' : ''} — ${dmg} damage${braced ? (hasManeuver('press') ? ' (Press — through the brace)' : ' (they braced — halved)') : ''}. ${tgt.name}: ${tgt.hp}/${tgt.hpMax}.`);
     if (tgt.hp <= 0) { returnGrabbedLoot(tgt); c.log.push(`${tgt.name} goes down.`); }
+    if (lucky) { c.player.luckyTurn = false; c.player.luckyBonus = 0; }
   }
-  p.strengthNext = 0;
-  if (p.motionTurns > 0) { p.motionTurns--; if (p.motionTurns === 0) c.log.push(`The powder wears off. Back to normal speed.`); }
+  c.player.strengthNext = 0;
+  if (c.player.motionTurns > 0) { c.player.motionTurns--; if (c.player.motionTurns === 0) c.log.push(`The powder wears off. Back to normal speed.`); }
   if (!c.enemies.some(e => e.hp > 0)) { winCombat(); return; }
   enemiesResolve();
   renderGame();
@@ -1658,7 +1893,7 @@ function combatFlee() {
   const c = gameState.combat;
   if (!c.active || c.outcome || c.phase !== 'fight') return;
   pushCombatSnapshot();
-  const evadeHelp = (gameState.player.motionTurns > 0) ? 0.2 : 0;
+  const evadeHelp = (gameState.combat.player.motionTurns > 0) ? 0.2 : 0;
   if (Math.random() > 0.35 - evadeHelp) {
     c.outcome = 'fled'; c.phase = 'over';
     c.log.push('You back off sharpish. Probably the right call.');
@@ -1672,15 +1907,25 @@ function combatFlee() {
 }
 
 // Consumables are free "answers" — they set up your turn; Attack/Blast/Flee end it.
+// Self-targeted items that come up allergic: consumed anyway, buff replaced
+// with a damage flavour beat instead of applying.
+function applyAllergicBackfire(c, p, itemLabel, oreLabel) {
+  const dmg = rand(4, 10);
+  p.hp = Math.max(0, p.hp - dmg);
+  c.log.push(`${itemLabel} — wrong reaction entirely. You're allergic to ${oreLabel}. ${dmg} damage instead. You: ${p.hp}/${p.hpMax}.`);
+  if (p.hp <= 0) loseCombat();
+}
 function combatUseTimePearl() {
   const c = gameState.combat, p = gameState.player;
   if (!c.active || c.outcome || c.phase !== 'fight' || (p.inventory.timePearl || 0) <= 0) return;
   const tgt = primaryEnemy();
   if (tgt.frozen > 0) { c.log.push('Already frozen. Save the pearl.'); renderGame(); return; }
   p.inventory.timePearl--;
-  const power = getCraftingEffectPower('timePearl');
+  const base = getCraftingEffectPower('timePearl');
+  const power = Math.max(0, Math.round(resolveEnemyEffect(base, 'time', tgt)));
   tgt.frozen = power; tgt.intent = null;
-  c.log.push(`You throw a time pearl at ${tgt.name}. The air goes thick. (${power} turn${power > 1 ? 's' : ''} frozen)`);
+  const line = getStance(tgt.affinities,'time') === 'resistant' ? ' They barely feel it.' : getStance(tgt.affinities,'time') === 'attuned' ? ' It bites deep — their own element, turned on them.' : '';
+  c.log.push(`You throw a time pearl at ${tgt.name}. The air goes thick.${power > 0 ? ` (${power} turn${power > 1 ? 's' : ''} frozen)` : ' Barely a flicker.'}${line}`);
   renderGame();
 }
 function combatUseEnhancement(mode) {
@@ -1688,12 +1933,15 @@ function combatUseEnhancement(mode) {
   if (!c.active || c.outcome || c.phase !== 'fight' || (p.inventory.enhancementPowder || 0) <= 0) return;
   p.inventory.enhancementPowder--;
   const power = getCraftingEffectPower('enhancementPowder');
+  const res = resolveSelfEffect(mode === 'strength' ? 4 + power * 3 : power, ['life']);
+  if (res.blocked) { applyAllergicBackfire(c, p, 'Enhancement Powder', 'life'); renderGame(); return; }
   if (mode === 'strength') {
-    p.strengthNext = 4 + power * 3;
-    c.log.push(`Strength variant — your next hit lands like a bus. (+${p.strengthNext} damage)`);
+    c.player.strengthNext = res.magnitude;
+    c.log.push(`Strength variant — your next hit lands like a bus.${affinityLine(['life'])} (+${c.player.strengthNext} damage)`);
   } else {
-    p.motionPower = power; p.motionTurns = power >= 3 ? 2 : 1;
-    c.log.push(`Speed variant — the world slows slightly around you. You feel very fast.`);
+    const adj = Math.max(1, res.magnitude);
+    c.player.motionPower = adj; c.player.motionTurns = adj >= 3 ? 2 : 1;
+    c.log.push(`Speed variant — the world slows slightly around you. You feel very fast.${affinityLine(['life'])}`);
   }
   renderGame();
 }
@@ -1702,17 +1950,84 @@ function combatUseShield() {
   if (!c.active || c.outcome || c.phase !== 'fight' || (p.inventory.shield || 0) <= 0) return;
   p.inventory.shield--;
   const power = getCraftingEffectPower('shield');
-  p.shield = Math.max(p.shield, power);
-  c.log.push(`You brace a physics shield. Absorbs the next ${power} hit${power > 1 ? 's' : ''}; momentum declines to arrive.`);
+  const res = resolveSelfEffect(power, ['physics']);
+  if (res.blocked) { applyAllergicBackfire(c, p, 'Shield', 'physics'); renderGame(); return; }
+  const hits = Math.max(0, res.magnitude);
+  c.player.shield = Math.max(c.player.shield, hits);
+  c.log.push(hits > 0
+    ? `You brace a physics shield. Absorbs the next ${hits} hit${hits > 1 ? 's' : ''}; momentum declines to arrive.${affinityLine(['physics'])}`
+    : `You brace a physics shield. It barely holds — used up before it does anything.${affinityLine(['physics'])}`);
   renderGame();
 }
 function combatUseHeal() {
   const c = gameState.combat, p = gameState.player;
   if (!c.active || c.outcome || c.phase !== 'fight' || (p.inventory.healingBurst || 0) <= 0) return;
   p.inventory.healingBurst--;
-  const amt = getCraftingEffectPower('healingBurst');
-  p.hp = Math.min(p.hpMax, p.hp + amt);
-  c.log.push(`Healing burst — time queues the recovery. +${amt} HP. You: ${p.hp}/${p.hpMax}.`);
+  const base = getCraftingEffectPower('healingBurst');
+  const res = resolveSelfEffect(base, ['time','life']);
+  if (res.blocked) { applyAllergicBackfire(c, p, 'Healing Burst', 'time or life'); renderGame(); return; }
+  p.hp = Math.min(p.hpMax, p.hp + res.magnitude);
+  c.log.push(`Healing burst — time queues the recovery. +${res.magnitude} HP.${affinityLine(['time','life'])} You: ${p.hp}/${p.hpMax}.`);
+  renderGame();
+}
+function combatUseProphetsBreath() {
+  const c = gameState.combat, p = gameState.player;
+  if (!c.active || c.outcome || c.phase !== 'fight' || (p.inventory.prophetsBreath || 0) <= 0) return;
+  p.inventory.prophetsBreath--;
+  const base = getCraftingEffectPower('prophetsBreath');
+  const res = resolveSelfEffect(base, ['time']);
+  if (res.blocked) { applyAllergicBackfire(c, p, 'Prophet’s Breath', 'time'); renderGame(); return; }
+  const turns = Math.max(0, res.magnitude);
+  c.player.evadeTurns = Math.max(c.player.evadeTurns, turns);
+  c.player.evadeChance = Math.max(c.player.evadeChance, 0.45);
+  c.log.push(turns > 0
+    ? `You inhale. For a moment you see the punch coming before it's thrown. Evade +${Math.round(c.player.evadeChance*100)}% for ${turns} turn${turns>1?'s':''}.${affinityLine(['time'])}`
+    : `You inhale. Nothing much comes.${affinityLine(['time'])}`);
+  renderGame();
+}
+function combatUsePansPrank(mode) {
+  const c = gameState.combat, p = gameState.player;
+  if (!c.active || c.outcome || c.phase !== 'fight' || (p.inventory.pansPrank || 0) <= 0) return;
+  p.inventory.pansPrank--;
+  const baseChance = getCraftingEffectPower('pansPrank');
+  if (mode === 'confidence') {
+    const res = resolveSelfEffect(3 + gameState.player.craftingSkill * 2, ['emotion']);
+    if (res.blocked) { applyAllergicBackfire(c, p, 'Pan’s Prank', 'emotion'); renderGame(); return; }
+    c.player.strengthNext = Math.max(c.player.strengthNext, res.magnitude);
+    c.log.push(`Confidence. You steady up.${affinityLine(['emotion'])} (+${res.magnitude} on your next hit)`);
+    renderGame();
+    return;
+  }
+  const tgt = primaryEnemy();
+  const chance = Math.max(0, Math.min(100, resolveEnemyEffect(baseChance, 'emotion', tgt)));
+  const landed = Math.random() * 100 < chance;
+  const resistLine = getStance(tgt.affinities,'emotion') === 'resistant' ? ` ${tgt.name} shrugs it off — built for this.` : '';
+  if (!landed) {
+    c.log.push(`Pan's Prank — it doesn't take.${resistLine}`);
+    renderGame();
+    return;
+  }
+  if (mode === 'panic') {
+    tgt.intent = { ...INTENTS.bolt };
+    c.log.push(`Panic. ${tgt.name}'s composure goes. They're bolting this turn whether they like it or not.`);
+  } else {
+    tgt.enraged = 1;
+    c.player.evadeChance = Math.max(c.player.evadeChance, 0.25);
+    c.player.evadeTurns = Math.max(c.player.evadeTurns, 1);
+    c.log.push(`Rage. ${tgt.name} comes in wild — harder hits, worse aim.`);
+  }
+  renderGame();
+}
+function combatUseLuck() {
+  const c = gameState.combat, p = gameState.player;
+  if (!c.active || c.outcome || c.phase !== 'fight' || (p.inventory.luckBeALady || 0) <= 0) return;
+  p.inventory.luckBeALady--;
+  const bonus = getCraftingEffectPower('luckBeALady');
+  const res = resolveSelfEffect(bonus, ['fate']);
+  if (res.blocked) { applyAllergicBackfire(c, p, 'Luck Be a Lady', 'fate'); renderGame(); return; }
+  c.player.luckyTurn = true; c.player.luckyBonus = res.magnitude;
+  c.player.evadeChance = Math.max(c.player.evadeChance, 1); c.player.evadeTurns = Math.max(c.player.evadeTurns, 1);
+  c.log.push(`Luck, briefly reliable. Your next hit lands at its absolute worst for them — and for one beat, nothing touches you.${affinityLine(['fate'])}`);
   renderGame();
 }
 function combatUseBlast() {
@@ -1745,7 +2060,7 @@ function combatUseDevice() {
   } else if (dt.effect === 'motion') {
     device.chargesUsedToday++; awardDeviceXP(device, 10);
     const power = RECIPES['enhancementPowder'].effectPower[p.craftingSkill] || 1;
-    p.motionTurns += 2; p.motionPower = power;
+    c.player.motionTurns += 2; c.player.motionPower = power;
     c.log.push(`You activate the ${dt.name}. Movement accelerated.`);
   }
   closeModal();
@@ -1779,7 +2094,7 @@ function enemiesResolve() {
     }
   }
   // Player evade decays per round
-  if (p.evadeTurns > 0) { p.evadeTurns--; if (p.evadeTurns === 0) p.evadeChance = 0; }
+  if (c.player.evadeTurns > 0) { c.player.evadeTurns--; if (c.player.evadeTurns === 0) c.player.evadeChance = 0; }
   // Re-telegraph living, unfrozen enemies for the next exchange
   c.enemies.forEach(e => { if (e.hp > 0 && e.frozen <= 0) telegraph(e); });
   // Remove any that bolted
@@ -1810,14 +2125,14 @@ function enemyAttackOne(e, mult, isGrab, firstStrike) {
   const c = gameState.combat, p = gameState.player;
   const label = INTENTS[e.intent?.id]?.label?.toLowerCase() || 'hit';
   // Evade
-  if (p.evadeTurns > 0 && Math.random() < p.evadeChance) {
+  if (c.player.evadeTurns > 0 && Math.random() < c.player.evadeChance) {
     c.log.push(`${e.name} ${label}s — you're not there.`);
     return;
   }
   // Shield absorbs a whole hit and negates contact (so no grab)
-  if (p.shield > 0) {
-    p.shield--;
-    c.log.push(`Your shield eats ${e.name}'s ${label}. (${p.shield} left)`);
+  if (c.player.shield > 0) {
+    c.player.shield--;
+    c.log.push(`Your shield eats ${e.name}'s ${label}. (${c.player.shield} left)`);
     return;
   }
   let dmg = Math.round(rand(e.attackMin, e.attackMax) * mult);
@@ -1953,7 +2268,7 @@ function exitCombat() {
   const saleEarned = c._saleEarned || 0;
   gameState.combat = {
     active: false, context: 'raid', phase: 'opener', veinId: null, enemies: [], log: [], outcome: null,
-    onWin: null, turn: 0, player: { shield: 0, evadeTurns: 0, evadeChance: 0, motionTurns: 0, motionPower: 0, strengthNext: 0 }, snapshots: [], pendingReinforce: null,
+    onWin: null, turn: 0, player: { shield: 0, evadeTurns: 0, evadeChance: 0, motionTurns: 0, motionPower: 0, strengthNext: 0, luckyTurn: false, luckyBonus: 0 }, snapshots: [], pendingReinforce: null,
   };
   if (ctx === 'home_raid') { afterHomeRaidCombat(outcome); return; }
   if (ctx === 'mugging') {

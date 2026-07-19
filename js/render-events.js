@@ -124,6 +124,13 @@ function renderJamesMotionEventScreen() {
 // ============================================================
 // RENDER: CONTACTS
 // ============================================================
+function renderContactAffinityLine(contactId) {
+  const ca = CONTACT_AFFINITIES[contactId];
+  const relation = gameState.contacts[contactId]?.relation || 0;
+  if (!ca || relation < ca.revealAt) return '';
+  return `<div style="font-family:var(--font-ui);font-size:11px;color:var(--muted);padding:0 0 8px;font-style:italic">${ca.blurb}</div>`;
+}
+
 function renderContactsScreen() {
   const stage    = gameState.flags.tutorialStage;
   const ore      = totalOre(gameState.player.orichalchum);
@@ -163,6 +170,7 @@ function renderContactsScreen() {
   const jamesCard = gameState.contacts.james.unlocked ? `
     <div class="contact-card">
       <div class="contact-card-header"><div class="contact-avatar">🧓</div><div><div class="contact-name">James</div><div class="contact-role">Craftsman · Bermondsey</div></div><div style="text-align:right"><div style="font-family:var(--font-ui);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em">Relation</div><div style="font-family:var(--font-ui);font-size:16px;font-weight:700;color:var(--amber)">${gameState.contacts.james.relation}</div></div></div>
+      ${renderContactAffinityLine('james')}
       <div class="contact-actions">
         ${craftingEventAction}
         ${jamesMotionAction}
@@ -177,6 +185,7 @@ function renderContactsScreen() {
     <div class="contacts-body">
       <div class="contact-card">
         <div class="contact-card-header"><div class="contact-avatar">🧔</div><div><div class="contact-name">Archie</div><div class="contact-role">Trader · Whitechapel</div></div><div style="text-align:right"><div style="font-family:var(--font-ui);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em">Relation</div><div style="font-family:var(--font-ui);font-size:16px;font-weight:700;color:var(--amber)">${gameState.contacts.archie.relation}</div></div></div>
+        ${renderContactAffinityLine('archie')}
         <div class="contact-actions">
           ${archieMotionAction}
           ${archieChatAction}

@@ -2,38 +2,118 @@
 // RENDER: CRAFTING SCREEN
 // ============================================================
 function renderCraftingScreen() {
-  const p=gameState.player, sk=p.craftingSkill, xp=p.craftingXP;
-  const nextLvl=CRAFTING_XP_LEVELS[sk+1]||null;
-  const xpPct=nextLvl?Math.round((xp-CRAFTING_XP_LEVELS[sk])/(nextLvl-CRAFTING_XP_LEVELS[sk])*100):100;
+  const p = gameState.player, sk = p.craftingSkill, xp = p.craftingXP;
+  const nextLvl = CRAFTING_XP_LEVELS[sk+1] || null;
+  const xpPct = nextLvl ? Math.round((xp-CRAFTING_XP_LEVELS[sk])/(nextLvl-CRAFTING_XP_LEVELS[sk])*100) : 100;
   const section = gameState.craftSection;
+  const sel = gameState.craftPickTypes || [];
+  const eyesPenalty = (p.strainedEyesDays||0) > 0;
 
-  // ── CONSUMABLES ───────────────────────────────────────────
-  const recipesHTML = Object.entries(RECIPES).map(([key,r]) => {
-    const cost=getCraftingCalcCost(key), chance=getCraftingSuccessChance(key), power=getCraftingEffectPower(key);
-    const canMake=canCraft(key);
-    const stock = key==='timePearl' ? (p.inventory.timePearl||0) : key==='enhancementPowder' ? (p.inventory.enhancementPowder||0) : (p.inventory.rewind||0);
-    const ingredientsHTML=r.ingredients.map(ing=>{
-      const have=p.orichalchum[ing.type]||0, ok=have>=cost;
-      return `<div class="recipe-ingredient"><span class="recipe-ingredient-name">${ORE_TYPES[ing.type].symbol} ${ORE_TYPES[ing.type].name}</span><span class="recipe-ingredient-qty ${ok?'ok':'missing'}">${have}/${cost}</span></div>`;
-    }).join('');
-    return `<div class="recipe-card">
-      <div class="recipe-card-header">
-        <div class="recipe-name">${r.symbol} ${r.name}</div>
-        <span class="pill ${canMake?'pill-success':'pill-danger'}">${canMake?'Can craft':'Missing calc'}</span>
-      </div>
-      <div class="recipe-body">
-        <div class="recipe-desc">${r.description}</div>
-        <div class="section-label">Ingredients (at Skill ${sk})</div>
-        <div class="recipe-ingredients">${ingredientsHTML}</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
-          <div class="vein-stat"><div class="vein-stat-label">Success</div><div class="vein-stat-value">${Math.round(chance*100)}%</div></div>
-          <div class="vein-stat"><div class="vein-stat-label">Effect</div><div class="vein-stat-value">${power} turn${power>1?'s':''}</div></div>
-          <div class="vein-stat"><div class="vein-stat-label">Stock</div><div class="vein-stat-value">${stock}</div></div>
-        </div>
-        <button class="btn ${canMake?'btn-amber':'btn-secondary'}" onclick="${canMake?`attemptCraft('${key}')`:'null'}" ${canMake?'':'disabled'}>Craft one</button>
-      </div>
+  // ── TYPE-LINK PICKER (§9a) ──────────────────────────────────
+  const typeRow = CRAFT_TYPE_ORDER.map((t, i) => {
+    const ore = ORE_TYPES[t];
+    const isSel = sel.includes(t);
+    const stance = getStance(p.affinities, t);
+    const stanceMark = stance === 'attuned' ? '<span class="type-icon-stance attuned">+</span>' : stance === 'resistant' ? '<span class="type-icon-stance resistant">−</span>' : stance === 'allergic' ? '<span class="type-icon-stance allergic">!</span>' : '';
+    const icon = `<div class="type-picker-icon ${isSel?'selected':''}" style="border-color:${isSel?ore.colour:'var(--border)'}" onclick="selectCraftType('${t}')" title="${ore.name}">
+      <span style="color:${ore.colour}">${ore.symbol}</span>${stanceMark}
     </div>`;
+    if (i === CRAFT_TYPE_ORDER.length - 1) return icon;
+    const nextT = CRAFT_TYPE_ORDER[i+1];
+    const linkActive = sel.length === 2 && sel.includes(t) && sel.includes(nextT);
+    const link = `<div class="type-picker-link ${linkActive?'active':''}" onclick="selectCraftPair('${t}','${nextT}')" title="${ore.name} + ${ORE_TYPES[nextT].name}"></div>`;
+    return icon + link;
   }).join('');
+
+  // ── RECIPE CARDS FOR CURRENT SELECTION ───────────────────────
+  let recipesHTML = '';
+  if (sel.length === 0) {
+    recipesHTML = `<div style="font-family:var(--font-ui);font-size:13px;color:var(--muted);text-align:center;padding:20px 10px">
+      Pick a type above — or a link between two — to see what you can make with it.
+    </div>`;
+  } else {
+    const keys = recipesMatchingTypes(sel);
+    const pairMode = sel.length === 2;
+    if (keys.length === 0) {
+      recipesHTML = `<div style="font-family:var(--font-ui);font-size:13px;color:var(--muted);text-align:center;padding:20px 10px">
+        Nothing known that uses ${pairMode ? 'exactly that combination' : 'just this type'}. Doesn't mean there's nothing to find.
+      </div>`;
+    } else {
+      recipesHTML = keys.map(key => {
+        const state = getRecipeDisplayState(key);
+        if (state === 'locked') return '';
+        const r = RECIPES[key];
+        if (state === 'known') {
+          const cost = getCraftingCalcCost(key), chance = getCraftingSuccessChance(key), power = getCraftingEffectPower(key);
+          const canMake = canCraft(key);
+          const stock = p.inventory[key] || 0;
+          const ingredientsHTML = r.ingredients.map(ing => {
+            const have = p.orichalchum[ing.type]||0, ok = have>=cost;
+            return `<div class="recipe-ingredient"><span class="recipe-ingredient-name">${ORE_TYPES[ing.type].symbol} ${ORE_TYPES[ing.type].name}</span><span class="recipe-ingredient-qty ${ok?'ok':'missing'}">${have}/${cost}</span></div>`;
+          }).join('');
+          const attunedNote = isRecipeAttuned(key) ? `<div style="font-family:var(--font-ui);font-size:11px;color:var(--success);margin-bottom:6px">Attuned — +10% success, effects amplified on you</div>` : '';
+          return `<div class="recipe-card">
+            <div class="recipe-card-header">
+              <div class="recipe-name">${r.symbol} ${r.name}</div>
+              <span class="pill ${canMake?'pill-success':'pill-danger'}">${canMake?'Can craft':'Missing calc'}</span>
+            </div>
+            <div class="recipe-body">
+              <div class="recipe-desc">${r.description}</div>
+              ${attunedNote}
+              <div class="section-label">Ingredients (at Skill ${sk})</div>
+              <div class="recipe-ingredients">${ingredientsHTML}</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
+                <div class="vein-stat"><div class="vein-stat-label">Success</div><div class="vein-stat-value">${Math.round((eyesPenalty?Math.max(0.03,chance-STRAINED_EYES_PENALTY):chance)*100)}%</div></div>
+                <div class="vein-stat"><div class="vein-stat-label">Effect</div><div class="vein-stat-value">${power}</div></div>
+                <div class="vein-stat"><div class="vein-stat-label">Stock</div><div class="vein-stat-value">${stock}</div></div>
+              </div>
+              <button class="btn ${canMake?'btn-amber':'btn-secondary'}" onclick="${canMake?`attemptCraft('${key}')`:'null'}" ${canMake?'':'disabled'}>Craft one</button>
+            </div>
+          </div>`;
+        }
+        // hinted: silhouette — name + symbol + ore cost visible, method not
+        if (state === 'hinted') {
+          const types = recipeIngredientTypes(key);
+          const canDiscover = canAffordDiscover(types) && !isTimeExhausted();
+          const costLine = types.map(t => `${DISCOVER_ORE_COST} ${ORE_TYPES[t].symbol}`).join(' + ');
+          return `<div class="recipe-card" style="opacity:0.85">
+            <div class="recipe-card-header">
+              <div class="recipe-name">${r.symbol} ${r.name} <span class="pill pill-amber" style="font-size:9px">hinted</span></div>
+            </div>
+            <div class="recipe-body">
+              <div class="recipe-desc">You know roughly what this needs. Not quite how yet.</div>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0">
+                <span style="font-family:var(--font-ui);font-size:12px;color:var(--muted)">Cost to discover: ${costLine} + 1 block</span>
+                <span style="font-family:var(--font-ui);font-size:12px;color:var(--amber)">${Math.round(getDiscoverChance(sk)*100)}%</span>
+              </div>
+              <button class="btn btn-amber" onclick="${canDiscover?`attemptDiscover('${key}')`:'null'}" ${canDiscover?'':'disabled'}>🔬 Discover</button>
+            </div>
+          </div>`;
+        }
+        return ''; // handled by the generic 'unknown' card below, once per selection
+      }).join('');
+      // one generic "something's discoverable" card if any matching recipe is still fully unknown
+      const unknownKey = keys.find(k => getRecipeDisplayState(k) === 'unknown');
+      if (unknownKey) {
+        const types = recipeIngredientTypes(unknownKey);
+        const canDiscover = canAffordDiscover(types) && !isTimeExhausted();
+        const costLine = types.map(t => `${DISCOVER_ORE_COST} ${ORE_TYPES[t].symbol}`).join(' + ');
+        recipesHTML += `<div class="recipe-card" style="opacity:0.6">
+          <div class="recipe-card-header">
+            <div class="recipe-name">? Unknown recipe</div>
+          </div>
+          <div class="recipe-body">
+            <div class="recipe-desc">Something might be discoverable with ${pairMode?'this combination':'this type'}. Spend calc and a time block to find out.</div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0">
+              <span style="font-family:var(--font-ui);font-size:12px;color:var(--muted)">Cost to try: ${costLine} + 1 block</span>
+              <span style="font-family:var(--font-ui);font-size:12px;color:var(--amber)">${Math.round(getDiscoverChance(sk)*100)}%</span>
+            </div>
+            <button class="btn btn-amber" onclick="${canDiscover?`attemptDiscover('${unknownKey}')`:'null'}" ${canDiscover?'':'disabled'}>🔬 Discover</button>
+          </div>
+        </div>`;
+      }
+    }
+  }
 
   // ── DEVICES ───────────────────────────────────────────────
   const inProgress = p.devicesInProgress || [];
@@ -89,7 +169,7 @@ function renderCraftingScreen() {
 
   const devicesHTML = `${inProgressHTML}${startNewHTML}`;
 
-  // ── ACCORDION HELPERS ─────────────────────────────────────
+  // ── ACCORDION HELPER (devices only now) ──────────────────────
   const accordion = (id, label, count, content) => {
     const open = section === id;
     return `<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:10px">
@@ -106,13 +186,15 @@ function renderCraftingScreen() {
   };
 
   return `<div class="crafting-screen screen-fade-enter">
-    <div class="screen-header"><button class="screen-header-back" onclick="navigate('home')">‹</button><div class="screen-header-titles"><div class="screen-header-eyebrow">Workshop</div><div class="screen-header-title">Crafting</div><div class="screen-header-sub">Skill ${sk}${nextLvl?` · ${xp}/${nextLvl} XP`:' · Max level'}</div></div></div>
+    <div class="screen-header"><button class="screen-header-back" onclick="navigate('home')">‹</button><div class="screen-header-titles"><div class="screen-header-eyebrow">Workshop</div><div class="screen-header-title">Crafting</div><div class="screen-header-sub">Skill ${sk}${nextLvl?` · ${xp}/${nextLvl} XP`:' · Max level'}${eyesPenalty?' · 👁 Strained Eyes':''}</div></div></div>
     <div class="crafting-body">
       <div>
         <div class="skill-bar-row"><span class="skill-bar-label">Crafting XP</span><span class="skill-bar-value">${xp} XP</span></div>
         <div class="bar-wrap"><div class="bar-fill xp" style="width:${xpPct}%"></div></div>
       </div>
-      ${accordion('consumables','Consumables', Object.keys(RECIPES).length + ' recipes', recipesHTML)}
+      <div class="section-label" style="margin-top:12px">Pick a type — or a link</div>
+      <div class="type-picker-row">${typeRow}</div>
+      ${recipesHTML}
       ${accordion('devices','Devices', inProgress.length > 0 ? inProgress.length + ' in progress' : null, devicesHTML)}
     </div>
   </div>`;
@@ -332,10 +414,71 @@ function renderCombatItemsModal() {
       ${btn((inv.enhancementPowder||0)>0, 'btn-secondary', "closeModal();combatUseEnhancement('speed')", `&#8623; Enhancement: Speed (${inv.enhancementPowder}) &mdash; extra attacks (beats Grab)`)}
       ${btn((inv.enhancementPowder||0)>0, 'btn-secondary', "closeModal();combatUseEnhancement('strength')", `&#128170; Enhancement: Strength &mdash; big next hit`)}
       ${btn((inv.healingBurst||0)>0, 'btn-primary', "closeModal();combatUseHeal()", `&#10010; Healing Burst (${inv.healingBurst}) &mdash; heal now`)}
+      ${btn((inv.prophetsBreath||0)>0, 'btn-secondary', "closeModal();combatUseProphetsBreath()", `&#128168; Prophet&rsquo;s Breath (${inv.prophetsBreath}) &mdash; evade for a turn or two`)}
+      ${btn((inv.pansPrank||0)>0, 'btn-secondary', "openModal('pans_prank_pick',{})", `&#127917; Pan&rsquo;s Prank (${inv.pansPrank}) &mdash; Panic / Rage / Confidence&hellip;`)}
+      ${btn((inv.luckBeALady||0)>0, 'btn-secondary', "closeModal();combatUseLuck()", `&#127808; Luck Be a Lady (${inv.luckBeALady}) &mdash; guaranteed max hit + evade`)}
       ${(inv.rewind||0)>0 && snapCount>0 ? `<button class="btn btn-primary" onclick="combatRewind()">&#8634; Rewind (${inv.rewind}) &mdash; undo, +evade</button>` : ''}
       ${(inv.rewind||0)>0 && snapCount===0 ? `<button class="btn btn-secondary" disabled>&#8634; Rewind &mdash; nothing to undo yet</button>` : ''}
       ${device && deviceCharges>0 ? `<button class="btn btn-primary" onclick="${dt?.effect==='rewind'?'combatRewind()':'combatUseDevice()'}">${dt.symbol} ${dt.name} (${deviceCharges}/${device.chargesPerDay})</button>` : ''}
       <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+    </div>
+  </div>`;
+}
+
+function renderPansPrankPickModal() {
+  const tgt = primaryEnemy();
+  const stance = tgt ? getStance(tgt.affinities, 'emotion') : 'neutral';
+  const resistNote = stance === 'resistant' ? `<div style="font-family:var(--font-ui);font-size:12px;color:var(--danger);margin-bottom:10px">${tgt.name} reads as emotion-resistant — this might not take.</div>` : '';
+  return `<div class="modal">
+    <div class="modal-title">Pan's Prank — pick a face</div>
+    <div class="modal-sub">${tgt ? `Panic and Rage target ${tgt.name}. Confidence is for you.` : 'Choose a mode.'}</div>
+    ${resistNote}
+    <div class="modal-actions">
+      <button class="btn btn-primary" onclick="closeModal();combatUsePansPrank('panic')">😨 Panic &mdash; forces a Bolt</button>
+      <button class="btn btn-primary" onclick="closeModal();combatUsePansPrank('rage')">😡 Rage &mdash; harder hits, worse aim</button>
+      <button class="btn btn-secondary" onclick="closeModal();combatUsePansPrank('confidence')">😌 Confidence &mdash; steadies your next hit</button>
+      <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+    </div>
+  </div>`;
+}
+
+function renderDiscoverResultModal(data) {
+  const r = RECIPES[data.recipeKey];
+  const titles = { known:'✅ Found it.', hinted:'🔍 A lead.', fail:'❌ Nothing.', incident:'💥 Minor incident.' };
+  let body;
+  switch (data.outcome) {
+    case 'known':    body = `The last piece clicks. <strong>${r.name}</strong> is yours to make — full recipe unlocked.`; break;
+    case 'hinted':   body = `You didn't crack it, but you know what you're looking for now. ${r.symbol} <strong>${r.name}</strong> shows as a hint in the crafting menu — cost visible, method not. One more session should do it.`; break;
+    case 'incident': body = `The calc dispersed — and took a bit more with it. Lost ${data.lost} extra ${ORE_TYPES[data.lostType].name.replace(' Orichalchum','')}. James would have opinions.`; break;
+    default:         body = `The calc dispersed without teaching you anything. Happens. Keep at it.`;
+  }
+  return `<div class="modal">
+    <div class="modal-title">${titles[data.outcome]}</div>
+    <div class="modal-sub">${body}</div>
+    <div class="modal-actions"><button class="btn btn-primary" onclick="closeModal()">Got it</button></div>
+  </div>`;
+}
+
+function renderCultivatorsStillPickModal(data) {
+  const veins = gameState.player.veins;
+  const device = (gameState.player.devicesCompleted||[]).find(d => d.id === data.deviceId);
+  if (!device) return '';
+  const rows = veins.length === 0
+    ? `<div style="font-family:var(--font-ui);font-size:13px;color:var(--muted);padding:8px 0">No veins to assign yet.</div>`
+    : veins.map(v => `<div class="action-card" onclick="assignCultivatorsStill('${device.id}','${v.id}');closeModal()" style="margin-bottom:6px${device.targetVeinId===v.id?';border-color:var(--amber)':''}">
+        <div class="action-card-left">
+          <div class="action-card-title">${ORE_TYPES[v.oreType].symbol} ${ORE_TYPES[v.oreType].name.replace(' Orichalchum','')} — Lv${v.level}</div>
+          <div class="action-card-sub">${DISTRICTS[veinDistrict(v)].name} · ${v.location}</div>
+        </div>
+        ${device.targetVeinId===v.id?'<span class="pill pill-amber">assigned</span>':''}
+      </div>`).join('');
+  return `<div class="modal">
+    <div class="modal-title">Assign the Still</div>
+    <div class="modal-sub">Tends one vein daily — +${DEVICE_TYPES.cultivatorsStill.devTick} development, free of a time block, while fuel holds.</div>
+    <div style="margin-bottom:16px">${rows}</div>
+    <div class="modal-actions">
+      ${device.targetVeinId ? `<button class="btn btn-secondary" onclick="assignCultivatorsStill('${device.id}',null);closeModal()">Unassign</button>` : ''}
+      <button class="btn btn-secondary" onclick="closeModal()">Close</button>
     </div>
   </div>`;
 }
@@ -785,6 +928,11 @@ function renderModal() {
   if (type==='district')          inner = renderDistrictModal(data);
   if (type==='prospect_result')   inner = renderProspectResultModal(data);
   if (type==='district_event')    inner = renderDistrictEventModal(data);
+  if (type==='pans_prank_pick')   inner = renderPansPrankPickModal();
+  if (type==='affinity_preview')  inner = renderAffinityPreviewModal(data);
+  if (type==='discover_result')   inner = renderDiscoverResultModal(data);
+  if (type==='assay_result')      inner = renderAssayResultModal(data);
+  if (type==='cultivators_still_pick') inner = renderCultivatorsStillPickModal(data);
   return inner ? `<div class="modal-overlay" onclick="if(event.target===this)closeModal()">${inner}</div>` : '';
 }
 

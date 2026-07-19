@@ -39,7 +39,7 @@ mutate it, screens re-render from it (`renderGame()`). The scripts are classic
 | `js/render-world.js` | Stats, world hub, property, factions, barometer, save/load screens |
 | `js/render-events.js` | Contact/SMS/story event screens |
 | `js/render-map.js` | London map (SVG), district/prospect/district-event modals, cultivating tutorial |
-| `js/render-craft-combat.js` | Crafting screen, combat screen, modals |
+| `js/render-craft-combat.js` | Crafting screen (type-link picker), combat screen, modals |
 | `js/render-master.js` | `renderGame()` master compositor + global nav |
 | `js/main.js` | Init + service worker registration |
 
@@ -92,6 +92,55 @@ Combat 2.0 and the systems that feed it:
   the new intent combat.
 - **Rewind** rebuilt for the array model (full-state snapshots); save
   migration adds the M2 fields and clears any old-format mid-fight combat.
+
+## M3 — "The Craft" (v0.8)
+
+Discovery, combination crafting, biology (affinities), and machines:
+
+- **Affinities, fixed at birth**: a new-game screen offers five preset
+  profiles or a random roll (rare allergy, compensated with bonus cash).
+  One attuned type (+10% craft success, self-effects +25%, device fuel −10%),
+  one resistant (self-effects ±50% dampened, both hostile and beneficial),
+  everything else neutral. Allergic blocks self-use of that type entirely —
+  the item still consumes, but backfires as damage instead of a buff.
+  Enemies carry the same profile shape (already seeded in M2's templates);
+  Time Pearl freeze and Pan's Prank potency now actually read it.
+- **Type-link crafting picker**: the plan's headline UI risk. A row of five
+  ore-type icons; tap one for its single-type recipes, tap a link (or a
+  second icon) for exactly that combination's recipes — the two-tap sequence
+  doubles as the "drag" alternative the plan describes. Verified at 390px
+  with ≥44px tap targets.
+- **Discovery-by-experimentation**: `DISCOVERABLE_RECIPES` (Prophet's
+  Breath, Pan's Prank, Luck Be a Lady) start unknown; the *Discover* action
+  spends ore + a time block and rolls vs crafting skill — unknown → hinted
+  (silhouette, cost visible, name hidden) → known (full recipe). Failures
+  are flavour text, occasionally a Minor Incident (extra ore lost). Recipes
+  taught by story (Time Pearl, Rewind, Blast, Shield, the Salve/Burst pair,
+  Enhancement Powder) are untouched — discovery layers on top, doesn't
+  replace the M0–M2 teaching beats.
+- **New consumables**: Prophet's Breath (time, self-evade), Pan's Prank
+  (emotion — Panic forces a Bolt, Rage enrages + drops their accuracy,
+  Confidence buffs your next hit; enemy emotion-resistance can shrug it
+  off), Luck Be a Lady (fate — guaranteed max hit + a beat of pure evade).
+- **Devices phase 1**: Assay Glass (fate, previews a district's best site
+  tier before you spend the block prospecting), Ward Stone (physics, daily
+  fuel, stacks with security to cut home raid chance), Cultivator's Still
+  (life, daily fuel, +1 dev/day to one assigned vein), Ocular Lathe (life,
+  cures the new minor Strained Eyes debuff — a rare crafting-failure side
+  effect, −10% success, self-clears in a few days or instantly via the
+  device). Utility devices are managed from Your Property, distinct from
+  the single combat-equip slot.
+- Save migration → v3 adds affinities/recipeState/Strained Eyes and
+  backfills two M2 combat-state fields (`luckyTurn`/`luckyBonus`) that
+  predate this milestone.
+
+**Found and fixed a real M2 latent bug while touching this code**: combat
+status effects (shield, evade, motion, strength) were being written to
+`gameState.player` instead of the intentionally-scoped `gameState.combat.player`
+— meaning the UI status chips never rendered and buffs could leak across
+fights. Rescoped every read/write; snapshot/rewind already used the correct
+object, so no data was ever lost, just displayed wrong and occasionally
+carried over.
 
 Conventions to preserve (they're what the vision doc's engine foundations rely
 on): screens never mutate state directly; `gameState` stays a pure data tree

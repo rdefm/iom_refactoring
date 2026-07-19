@@ -660,3 +660,134 @@ const COMBAT_CONSUMABLES = {
   healingBurst:      { use:'heal' },
   rewind:            { use:'rewind' },
 };
+
+// ============================================================
+// M3 — THE CRAFT: AFFINITIES, DISCOVERY, NEW CONSUMABLES, DEVICES
+// ============================================================
+
+// ── AFFINITIES (fixed at birth) ──────────────────────────────
+const AFFINITY_STANCES = {
+  attuned:   { id:'attuned',   label:'Attuned',   selfMult:1.25, craftBonus:0.10, fuelMult:0.90 },
+  neutral:   { id:'neutral',   label:'Neutral',   selfMult:1.00, craftBonus:0,    fuelMult:1.00 },
+  resistant: { id:'resistant', label:'Resistant', selfMult:0.50, craftBonus:0,    fuelMult:1.00 },
+  allergic:  { id:'allergic',  label:'Allergic',  selfMult:0,    craftBonus:0,    fuelMult:1.00 },
+};
+
+// Preset profiles offered at new game — 1 attuned, 1 resistant, 3 neutral.
+const AFFINITY_PRESETS = {
+  oldMoney:   { id:'oldMoney',   name:'Old Money',   attuned:'fate',    resistant:'emotion',
+    blurb:`Born knowing the odds. Thick-skinned about feelings — yours or anyone else's.` },
+  steadyHands:{ id:'steadyHands',name:'Steady Hands',attuned:'life',    resistant:'physics',
+    blurb:`Heals clean, mends fast. Shrugs off impacts that should have put you down.` },
+  clockwork:  { id:'clockwork',  name:'Clockwork',   attuned:'time',    resistant:'fate',
+    blurb:`Precise, unhurried, doesn't believe in luck. Time listens to you; chance doesn't.` },
+  liveWire:   { id:'liveWire',   name:'Live Wire',   attuned:'physics', resistant:'time',
+    blurb:`Kinetic and impatient. Force obeys you; waiting does not.` },
+  empath:     { id:'empath',     name:'Empath',      attuned:'emotion', resistant:'life',
+    blurb:`Reads a room before it's finished forming. Strangely numb to being looked after.` },
+};
+
+function buildAffinityProfile(attunedType, resistantType, allergicType) {
+  const p = {};
+  ORE_TYPE_KEYS.forEach(k => { p[k] = 'neutral'; });
+  if (attunedType)   p[attunedType]   = 'attuned';
+  if (resistantType) p[resistantType] = 'resistant';
+  if (allergicType)  p[allergicType]  = 'allergic'; // overrides resistant slot if rolled
+  return p;
+}
+// Random roll: any attuned + any different resistant; ~5% chance the resistant
+// slot becomes an allergy instead, compensated with bonus starting cash.
+function rollRandomAffinityProfile() {
+  const attuned = randFrom(ORE_TYPE_KEYS);
+  let second = randFrom(ORE_TYPE_KEYS.filter(k => k !== attuned));
+  const isAllergic = Math.random() < 0.05;
+  return {
+    profile: buildAffinityProfile(attuned, isAllergic ? null : second, isAllergic ? second : null),
+    isAllergic, allergicType: isAllergic ? second : null, bonusCash: isAllergic ? 250 : 0,
+  };
+}
+
+// Flavour affinity profiles for recruitable contacts — discoverable via relation.
+const CONTACT_AFFINITIES = {
+  archie: { profile: buildAffinityProfile('physics','time'), revealAt:30,
+    blurb:`Physics-attuned, time-resistant. Explains a lot about how he moves through a room.` },
+  james:  { profile: buildAffinityProfile('time','emotion'), revealAt:40,
+    blurb:`Time-attuned, emotion-resistant. Explains rather more about how he moves through a conversation.` },
+};
+
+// ── DISCOVERY-BY-EXPERIMENTATION ─────────────────────────────
+// Recipes not listed here are "taught" (governed by existing story flags, as
+// before). Recipes listed here start 'unknown' and can only be found via the
+// Discover action on the crafting screen — three-state: unknown -> hinted
+// (silhouette + cost visible) -> known (usable).
+const DISCOVERABLE_RECIPES = ['prophetsBreath', 'pansPrank', 'luckBeALady'];
+const DISCOVER_ORE_COST = 8; // per ingredient type, spent on every attempt regardless of outcome
+function getDiscoverChance(skill) { return Math.min(0.65, 0.20 + (skill - 1) * 0.09); }
+
+const M3_RECIPES = {
+  prophetsBreath: {
+    name:'Prophet’s Breath', symbol:'\u{1F4A8}',
+    description:'Time-type. An inhaler. +Evade for 1–2 turns — you see the punch coming before it lands.',
+    ingredients:[{ type:'time', baseQty:5 }], baseSuccess:0.36, baseCalcCost:5,
+    effectPower:[0, 1, 1, 2, 2, 2], xpReward:26, combat:'evade',
+  },
+  pansPrank: {
+    name:'Pan’s Prank', symbol:'\u{1F3AD}',
+    description:'Emotion-type. Choose: Panic (forces a Bolt), Rage (enrages them — more damage, worse aim), or Confidence (steadies your own next hit). Some people don’t feel it at all.',
+    ingredients:[{ type:'emotion', baseQty:5 }], baseSuccess:0.36, baseCalcCost:5,
+    effectPower:[0, 45, 55, 65, 78, 90], xpReward:28, combat:'prank',
+  },
+  luckBeALady: {
+    name:'Luck Be a Lady', symbol:'\u{1F340}',
+    description:'Fate-type. One turn: guaranteed maximum damage, plus a beat of pure evade. Fate, made briefly reliable.',
+    ingredients:[{ type:'fate', baseQty:5 }], baseSuccess:0.34, baseCalcCost:5,
+    effectPower:[0, 0, 2, 4, 6, 8], xpReward:30, combat:'luck',
+  },
+};
+Object.assign(RECIPES, M3_RECIPES);
+CONSUMABLE_KEYS.push('prophetsBreath', 'pansPrank', 'luckBeALady');
+Object.assign(COMBAT_CONSUMABLES, {
+  prophetsBreath: { use:'evade' },
+  pansPrank:      { use:'prank' },
+  luckBeALady:    { use:'luck' },
+});
+
+// ── STRAINED EYES (minor debuff, gives Ocular Lathe a reason to exist) ──
+// Rare chance on a failed craft/device attempt. -10% crafting success while
+// active; clears itself after a few days, or instantly via Ocular Lathe.
+const STRAINED_EYES_CHANCE = 0.06;
+const STRAINED_EYES_DAYS = 3;
+const STRAINED_EYES_PENALTY = 0.10;
+
+// ── DEVICES PHASE 1 (M3 launch set) — utility devices, separate from the
+// combat-slot devices above. Higher crafting skill = lower fuel cost;
+// affinity to the fuel type shaves another 10% off (see resolveDeviceFuelCost).
+Object.assign(DEVICE_TYPES, {
+  assayGlass: {
+    id:'assayGlass', name:'Assay Glass', symbol:'\u{1F50D}',
+    calcType:'fate', recipeKey:'luckBeALady', utility:true, useType:'assay', fuelPerUse:6,
+    description:`Fate-type. Held up to a district, it shows the best site your prospecting would likely turn up — before you spend the time block finding out the hard way. Information, priced.`,
+    unlockFlag:'craftingUnlocked',
+  },
+  wardStone: {
+    id:'wardStone', name:'Ward Stone', symbol:'\u{1F6E1}',
+    calcType:'physics', recipeKey:'blast', utility:true, useType:'passive-raid', dailyFuel:4, raidReduction:0.06,
+    description:`Physics-type. A passive home security device. Drains fuel daily while active; meaningfully cuts your raid chance, and stacks with installed security.`,
+    unlockFlag:'craftingUnlocked',
+  },
+  cultivatorsStill: {
+    id:'cultivatorsStill', name:'Cultivator’s Still', symbol:'\u{1F3FA}',
+    calcType:'life', recipeKey:'healingSalve', utility:true, useType:'passive-cultivate', dailyFuel:3, devTick:1,
+    description:`Life-type. Assign it to one vein and it tends that vein a little every day — +1 development, free of a time block, for as long as the fuel holds out.`,
+    unlockFlag:'craftingUnlocked',
+  },
+  ocularLathe: {
+    id:'ocularLathe', name:'Ocular Lathe', symbol:'\u{1F441}',
+    calcType:'life', recipeKey:'healingSalve', utility:true, useType:'cure', fuelPerUse:5,
+    description:`Life-type. The flagship civilian device — a cataract healer, repurposed. Cures Strained Eyes instantly. James insists its real use is something else entirely, and won't elaborate.`,
+    unlockFlag:'craftingUnlocked',
+  },
+});
+
+// ── CRAFTING SCREEN TYPE ORDER (type-link picker, §9a) ───────
+const CRAFT_TYPE_ORDER = ['time', 'physics', 'life', 'fate', 'emotion'];

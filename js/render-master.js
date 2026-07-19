@@ -8,6 +8,7 @@ function renderGame() {
   let html='';
   switch (gameState.currentScreen) {
     case 'title':            html=renderTitleScreen();          break;
+    case 'affinity_select':  html=renderAffinitySelectScreen(); break;
     case 'intro':            html=renderIntroScreen();          break;
     case 'home':             html=renderHomeScreen();           break;
     case 'veins':            html=renderVeinsScreen();          break;
@@ -34,7 +35,7 @@ function renderGame() {
     case 'combat':           html=renderCombatScreen();         break;
     default: html=`<p style="padding:20px">Unknown screen: ${gameState.currentScreen}</p>`;
   }
-  const NO_NAV = ['title','intro','event_james','event_buyer','event_archie_craft_chat','event_archie_motion','event_james_motion','event_home_raid_intro','event_home_raid_debrief','event_cultivate_tutorial','combat'];
+  const NO_NAV = ['title','affinity_select','intro','event_james','event_buyer','event_archie_craft_chat','event_archie_motion','event_james_motion','event_home_raid_intro','event_home_raid_debrief','event_cultivate_tutorial','combat'];
   const showNav = !NO_NAV.includes(gameState.currentScreen);
   const navHTML = showNav ? renderGlobalNav() : '';
   const spacer  = showNav ? '<div class="global-nav-spacer"></div>' : '';

@@ -25,9 +25,12 @@ const gameState = {
     attackMax:  12,
     currentDistrict: 'shoreditch',
     reputation:  0,
+    affinities:  { time:'neutral', physics:'neutral', life:'neutral', fate:'neutral', emotion:'neutral' }, // set at new game
+    recipeState: {},         // { prophetsBreath:'unknown'|'hinted'|'known', ... } — discoverable recipes only
+    strainedEyesDays: 0,
     orichalchum: {},
     veins:       [],
-    inventory:      { timePearl: 0, enhancementPowder: 0, rewind: 0, blast: 0, shield: 0, healingSalve: 0, healingBurst: 0 },
+    inventory:      { timePearl: 0, enhancementPowder: 0, rewind: 0, blast: 0, shield: 0, healingSalve: 0, healingBurst: 0, prophetsBreath: 0, pansPrank: 0, luckBeALady: 0 },
     craftingSkill:    1,
     craftingXP:       0,
     cultivatingSkill: 1,
@@ -87,7 +90,7 @@ const gameState = {
     outcome:   null,        // win | loss | fled | talked | bribed | intimidated
     onWin:     null,
     turn:      0,
-    player:    { shield:0, evadeTurns:0, evadeChance:0, motionTurns:0, motionPower:0, strengthNext:0 },
+    player:    { shield:0, evadeTurns:0, evadeChance:0, motionTurns:0, motionPower:0, strengthNext:0, luckyTurn:false, luckyBonus:0 },
     snapshots: [],
     reinforceFrom: null,    // template id queued by a Call intent
   },
@@ -124,6 +127,7 @@ const gameState = {
   labThresholds:    {},   // { recipeKey: targetQty }
   veinStationVeins: [],   // vein ids to auto-cultivate
   craftSection:     null, // 'consumables' | 'devices' | null — accordion state
+  craftPickTypes:   [],   // up to 2 ore type keys selected on the crafting screen's type-link picker
   barometerProgress:  null, // initialised on first use — { section: { stateId: 0-100 } }
   barometerCooldowns: null, // { section: { stateId: { push: day, pull: day } } }
 };

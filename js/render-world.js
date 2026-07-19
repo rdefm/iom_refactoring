@@ -81,6 +81,21 @@ function renderStatsScreen() {
         </div>
       </div>
       <div>
+        <div class="stats-section-title">Affinity</div>
+        <div class="card" style="display:flex;flex-wrap:wrap;gap:10px 16px">
+          ${ORE_TYPE_KEYS.map(t => {
+            const stance = getStance(p.affinities, t);
+            const s = AFFINITY_STANCES[stance];
+            const color = stance==='attuned'?'var(--success)':stance==='resistant'?'var(--slate)':stance==='allergic'?'var(--danger)':'var(--muted)';
+            return `<div style="text-align:center;min-width:56px">
+              <div style="font-size:20px;color:${ORE_TYPES[t].colour}">${ORE_TYPES[t].symbol}</div>
+              <div style="font-family:var(--font-ui);font-size:10px;color:${color};font-weight:700;text-transform:uppercase;margin-top:2px">${s.label}</div>
+            </div>`;
+          }).join('')}
+        </div>
+        ${(p.strainedEyesDays||0) > 0 ? `<div style="font-family:var(--font-ui);font-size:12px;color:var(--danger);margin-top:8px">👁 Strained Eyes — -10% crafting success, clears in ${p.strainedEyesDays} day${p.strainedEyesDays>1?'s':''} (or use an Ocular Lathe)</div>` : ''}
+      </div>
+      <div>
         <div class="stats-section-title">Operations</div>
         <div class="stats-grid">
           <div class="stats-card">
@@ -341,8 +356,58 @@ function renderPropertyScreen() {
       </div>` : '<div class="card" style="font-family:var(--font-ui);font-size:13px;color:var(--muted)">Maximum tier reached.</div>'}
       <div><div class="section-label">Security (${h.security.length}/${tier.maxSecuritySlots} slots)</div>${secNote}${secHTML}</div>
       <div><div class="section-label">Rooms (${h.rooms.length}/${tier.maxRooms} slots)</div>${roomsHTML}</div>
+      ${renderUtilityDevicesSection(p)}
     </div>
   </div>`;
+}
+
+// ── M3: UTILITY DEVICES (Ward Stone, Cultivator's Still, Ocular Lathe) ──
+function renderUtilityDevicesSection(p) {
+  const devices = (p.devicesCompleted||[]).filter(d => DEVICE_TYPES[d.type]?.utility);
+  if (devices.length === 0) return '';
+  const rows = devices.map(d => {
+    const dt = DEVICE_TYPES[d.type];
+    if (dt.useType === 'passive-raid') {
+      const fuel = resolveDeviceFuelCost(dt.calcType, dt.dailyFuel);
+      return `<div class="upgrade-row">
+        <div class="upgrade-row-info">
+          <div class="upgrade-row-name">${dt.symbol} ${dt.name} ${d.active?'<span class="pill pill-success" style="font-size:9px">active</span>':''}</div>
+          <div class="upgrade-row-desc">−${Math.round(dt.raidReduction*100)}% raid chance while active · ${fuel} ${ORE_TYPES[dt.calcType].symbol}/day</div>
+        </div>
+        <div class="upgrade-row-cost"><button class="btn ${d.active?'btn-secondary':'btn-amber'}" style="padding:6px 12px;font-size:12px;width:auto" onclick="toggleWardStone('${d.id}')">${d.active?'Deactivate':'Activate'}</button></div>
+      </div>`;
+    }
+    if (dt.useType === 'passive-cultivate') {
+      const vein = p.veins.find(v => v.id === d.targetVeinId);
+      const fuel = resolveDeviceFuelCost(dt.calcType, dt.dailyFuel);
+      return `<div class="upgrade-row">
+        <div class="upgrade-row-info">
+          <div class="upgrade-row-name">${dt.symbol} ${dt.name} ${d.active&&vein?'<span class="pill pill-success" style="font-size:9px">active</span>':''}</div>
+          <div class="upgrade-row-desc">${vein ? `Tending ${ORE_TYPES[vein.oreType].name.replace(' Orichalchum','')} in ${DISTRICTS[veinDistrict(vein)].name}` : 'Unassigned'} · +${dt.devTick} dev/day · ${fuel} ${ORE_TYPES[dt.calcType].symbol}/day</div>
+        </div>
+        <div class="upgrade-row-cost"><button class="btn btn-secondary" style="padding:6px 12px;font-size:12px;width:auto" onclick="openModal('cultivators_still_pick',{deviceId:'${d.id}'})">${vein?'Reassign':'Assign'}</button></div>
+      </div>`;
+    }
+    if (dt.useType === 'cure') {
+      const has = (p.strainedEyesDays||0) > 0;
+      const fuel = resolveDeviceFuelCost(dt.calcType, dt.fuelPerUse);
+      return `<div class="upgrade-row">
+        <div class="upgrade-row-info">
+          <div class="upgrade-row-name">${dt.symbol} ${dt.name}</div>
+          <div class="upgrade-row-desc">${has ? `Cures Strained Eyes now · ${fuel} ${ORE_TYPES[dt.calcType].symbol}` : 'Nothing to cure right now'}</div>
+        </div>
+        <div class="upgrade-row-cost"><button class="btn ${has?'btn-amber':'btn-secondary'}" style="padding:6px 12px;font-size:12px;width:auto" onclick="useOcularLathe('${d.id}')" ${has?'':'disabled'}>Use</button></div>
+      </div>`;
+    }
+    // assayGlass is used from the district modal on the map, not here
+    return `<div class="upgrade-row">
+      <div class="upgrade-row-info">
+        <div class="upgrade-row-name">${dt.symbol} ${dt.name}</div>
+        <div class="upgrade-row-desc">Use from a district on the map.</div>
+      </div>
+    </div>`;
+  }).join('');
+  return `<div><div class="section-label">Devices</div>${rows}</div>`;
 }
 
 // ============================================================
@@ -467,7 +532,7 @@ function renderFactionDetailModal(data) {
 function renderSaveScreen() {
   const slots = getSaveSlots();
   const slotsHTML = slots.map(s => {
-    const filled = s.meta !== null;
+    const filled = s.meta != null; // catches both a parse failure (null) and a raw save with no __meta (undefined)
     return `<div class="save-slot">
       <div class="save-slot-info">
         <div class="save-slot-name">Slot ${s.slot}</div>

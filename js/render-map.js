@@ -239,6 +239,11 @@ function renderDistrictModal(data) {
       ${d.canProspect ? `<button class="btn btn-amber" onclick="prospectDistrict('${d.id}')" ${canProspect ? '' : 'disabled'}>
         ⛏ Prospect — ${prospectNeed} block${prospectNeed>1?'s':''}${travel?' (incl. travel)':''}${atCap ? ' · re-rolls worst site' : ''}${!canProspect && d.canProspect ? ' · no time' : ''}
       </button>` : `<div style="font-family:var(--font-ui);font-size:12px;color:var(--muted);text-align:center;padding:4px">Soho doesn't grow anything. Soho sells.</div>`}
+      ${(gameState.player.devicesCompleted||[]).filter(dv => dv.type==='assayGlass').map(dv => {
+        const fuel = resolveDeviceFuelCost('fate', DEVICE_TYPES.assayGlass.fuelPerUse);
+        const canUse = d.canProspect && (gameState.player.orichalchum.fate||0) >= fuel;
+        return `<button class="btn btn-secondary" onclick="useAssayGlass('${dv.id}','${d.id}')" ${canUse?'':'disabled'}>🔍 Assay Glass — preview best site (${fuel} fate)</button>`;
+      }).join('')}
       <button class="btn btn-secondary" onclick="closeModal()">Close</button>
     </div>
   </div>`;
@@ -293,4 +298,19 @@ function renderCultivateTutorialScreen() {
     CULTIVATE_TUTORIAL_CARDS, cultivateTutorialStep, CULTIVATE_TUTORIAL_CARDS.length,
     'advanceCultivateTutorial', 'completeCultivateTutorial', 'To the vein →', 'rewindCultivateTutorial'
   );
+}
+
+// ── ASSAY GLASS RESULT MODAL ─────────────────────────────────
+function renderAssayResultModal(data) {
+  const d = DISTRICTS[data.districtId];
+  const t = SITE_TIERS[data.tier];
+  return `<div class="modal">
+    <div class="modal-title">🔍 The glass clears</div>
+    <div style="font-family:var(--font-ui);font-size:11px;color:var(--muted);margin-bottom:6px">${d.name}</div>
+    <div class="modal-sub">Best prospect right now reads as <strong style="color:var(--amber)">${t.label}</strong>. ${t.blurb}<br><span style="color:var(--muted)">A preview, not a promise — the ground shifts by the time you get a spade in it.</span></div>
+    <div class="modal-actions">
+      ${d.canProspect ? `<button class="btn btn-amber" onclick="closeModal();prospectDistrict('${d.id}')">⛏ Prospect now</button>` : ''}
+      <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+    </div>
+  </div>`;
 }

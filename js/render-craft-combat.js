@@ -122,18 +122,84 @@ function renderCraftingScreen() {
 // RENDER: COMBAT
 // ============================================================
 function renderCombatScreen() {
-  const c=gameState.combat, p=gameState.player;
-  const pPct=Math.round((p.hp/p.hpMax)*100), ePct=c.enemy?Math.round((c.enemy.hp/c.enemy.hpMax)*100):0;
-  const frozen=c.frozenTurns>0;
-  const motion=c.motionTurns>0;
-  const equippedDevice = p.equipment.device ? (p.devicesCompleted||[]).find(d=>d.id===p.equipment.device) : null;
-  const hasCombatItems = (p.inventory.timePearl||0)+(p.inventory.enhancementPowder||0) > 0 || (equippedDevice && getDeviceChargesLeft(equippedDevice) > 0);
-  const logHTML=c.log.slice(-6).map(line=>{const cls=line.includes('You attack')||line.includes('pearl')?'player-hit':line.includes('hits you')?'enemy-hit':'info';return `<div class="combat-log-line ${cls}">${line}</div>`;}).join('');
-  const fightBar=!c.outcome?`<div class="combat-actions"><button class="btn btn-danger" onclick="combatPlayerAttack()">⚔ Attack</button><button class="btn btn-secondary" onclick="combatFlee()">🏃 Run</button><button class="btn btn-secondary" onclick="combatUseItem()" ${!hasCombatItems?'disabled':''}>🎒 Item</button><button class="btn btn-secondary" style="opacity:0.4;cursor:default">✨ Ability</button></div>`:'';
-  const mugWinLabel = '✅ They\u2019ve legged it';
-  const outcomeLabel = c.outcome==='win' ? (c.context==='mugging' ? mugWinLabel : '✅ Vein secured') : c.outcome==='fled' ? '🏃 Scarper' : '💀 Come round';
-  const outcomeBar=c.outcome?`<div class="action-bar visible"><button class="btn ${c.outcome==='win'?'btn-success':'btn-primary'}" onclick="exitCombat()">${outcomeLabel}</button></div>`:'';
-  return `<div class="combat-screen screen-fade-enter"><div class="screen-header"><div class="screen-header-titles"><div class="screen-header-eyebrow">${c.context==='mugging'?'Mugging':'Raid'}</div><div class="screen-header-title">${c.enemy?.name||'Combat'}</div><div class="screen-header-sub">${c.enemy?.veinRef?.location||''}</div></div></div><div class="combat-body"><div class="combatant-card"><div class="combatant-name">You</div><div class="combatant-hp">${p.hp} / ${p.hpMax} HP</div>${motion?`<div class="combatant-status" style="color:var(--success)">↯ Motion — ${c.motionTurns} turn${c.motionTurns>1?"s":""} · ${c.motionPower>=3?3:2}× attacks</div>`:""}<div class="bar-wrap"><div class="bar-fill hp ${pPct<30?"low":""}" style="width:${pPct}%"></div></div></div><div class="combatant-card enemy"><div class="combatant-name">${c.enemy?.name||'Enemy'}</div><div class="combatant-hp">${c.enemy?.hp||0} / ${c.enemy?.hpMax||0} HP</div>${frozen?`<div class="combatant-status">⧖ Frozen — ${c.frozenTurns} turn${c.frozenTurns>1?'s':''}</div>`:''}<div class="bar-wrap"><div class="bar-fill hp ${ePct<30?'low':''}" style="width:${ePct}%"></div></div></div><div class="combat-log">${logHTML}</div></div>${c.outcome?outcomeBar:fightBar}</div>`;
+  const c = gameState.combat, p = gameState.player;
+  const logHTML = c.log.slice(-7).map(line => {
+    const cls = /^You attack|Blast|pearl|shield|Strength|Speed|Healing|Press|take your things/i.test(line) ? 'player-hit'
+      : /for \d+\.|free |grabs|snatches|bolts|Backup/i.test(line) ? 'enemy-hit' : 'info';
+    return `<div class="combat-log-line ${cls}">${line}</div>`;
+  }).join('');
+  return renderCombat2(c, p, logHTML);
+}
+function renderCombat2(c, p, logHTML) {
+  const pPct = Math.round((p.hp / p.hpMax) * 100);
+  const ps = c.player || {};
+  const eyebrow = c.context === 'mugging' ? 'Mugging' : c.context === 'home_raid' ? 'Break-in' : c.context === 'vein_raid' ? 'Vein Raid' : 'Raid';
+  const primary = (c.enemies || []).find(e => e.hp > 0) || (c.enemies || [])[0];
+  const liveCount = (c.enemies || []).filter(e => e.hp > 0).length;
+
+  const pChips = [];
+  if (ps.shield > 0)       pChips.push(`SHIELD x${ps.shield}`);
+  if (ps.motionTurns > 0)  pChips.push(`Fast (${ps.motionTurns})`);
+  if (ps.strengthNext > 0) pChips.push(`+${ps.strengthNext} next hit`);
+  if (ps.evadeTurns > 0)   pChips.push(`Evade (${ps.evadeTurns})`);
+  const pChipHTML = pChips.length ? `<div class="combatant-status" style="color:var(--success)">${pChips.join(' - ')}</div>` : '';
+
+  const enemyCards = (c.enemies || []).filter(e => e.hp > 0).map(e => {
+    const ePct = Math.round((e.hp / e.hpMax) * 100);
+    const intent = e.intent;
+    const intentHTML = e.frozen > 0
+      ? `<div class="intent-row" style="border-color:#7b68ee"><span class="intent-icon">&#9203;</span><div><div class="intent-label">Frozen (${e.frozen})</div><div class="intent-line">Not going anywhere.</div></div></div>`
+      : intent
+      ? `<div class="intent-row"><span class="intent-icon">${intent.icon}</span><div><div class="intent-label">${intent.label}${intent.mult ? ` x${intent.mult}` : ''}</div><div class="intent-line">${intent.line}</div></div></div><div class="intent-answer">&#8627; ${intent.answers}</div>`
+      : '';
+    return `<div class="combatant-card enemy">
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <div class="combatant-name">${e.name} <span class="pill" style="font-size:9px;background:#efe9dd;color:var(--slate)">T${e.tier}</span></div>
+        ${e.grabbedLoot ? `<span style="font-size:11px;color:var(--danger)">has your stuff</span>` : ''}
+      </div>
+      <div class="combatant-hp">${e.hp} / ${e.hpMax} HP</div>
+      <div class="bar-wrap"><div class="bar-fill hp ${ePct < 30 ? 'low' : ''}" style="width:${ePct}%"></div></div>
+      ${c.phase === 'fight' ? intentHTML : ''}
+    </div>`;
+  }).join('');
+
+  let bar = '';
+  if (c.phase === 'opener' && primary) {
+    const e = primary;
+    const bribe = bribeCost(e), canBribe = (p.cash || 0) >= bribe;
+    bar = `<div class="combat-actions" style="grid-template-columns:1fr 1fr">
+      <button class="btn btn-secondary" onclick="openerTalk()">Talk<span style="display:block;font-size:11px;opacity:0.7">${Math.round(talkChance(e) * 100)}% - free</span></button>
+      <button class="btn btn-secondary" onclick="openerBribe()" ${canBribe ? '' : 'disabled'}>Bribe<span style="display:block;font-size:11px;opacity:0.7">&pound;${bribe}${canBribe ? '' : ' - short'}</span></button>
+      <button class="btn btn-secondary" onclick="openerIntimidate()">Intimidate<span style="display:block;font-size:11px;opacity:0.7">${Math.round(intimidateChance(e) * 100)}%</span></button>
+      <button class="btn btn-danger" onclick="openerFight()">Fight<span style="display:block;font-size:11px;opacity:0.7">start it</span></button>
+    </div>`;
+  } else if (c.phase === 'fight' && !c.outcome) {
+    const dev = p.equipment.device ? (p.devicesCompleted || []).find(d => d.id === p.equipment.device) : null;
+    const hasItems = ['timePearl','enhancementPowder','blast','shield','healingBurst','rewind'].some(k => (p.inventory[k] || 0) > 0) || (dev && getDeviceChargesLeft(dev) > 0);
+    bar = `<div class="combat-actions"><button class="btn btn-danger" onclick="combatPlayerAttack()">Attack</button><button class="btn btn-secondary" onclick="combatUseItem()" ${hasItems ? '' : 'disabled'}>Item</button><button class="btn btn-secondary" onclick="combatFlee()">Run</button></div>`;
+  } else if (c.outcome) {
+    const label = c.outcome === 'win' ? (c.context === 'mugging' ? 'They have legged it' : c.context === 'raid' ? 'Vein secured' : 'Sorted')
+      : c.outcome === 'talked' ? 'Talked your way out' : c.outcome === 'bribed' ? 'Paid them off'
+      : c.outcome === 'intimidated' ? 'Scared them off' : c.outcome === 'fled' ? 'Scarpered' : 'Come round';
+    const good = ['win','talked','bribed','intimidated','fled'].includes(c.outcome);
+    bar = `<div class="action-bar visible"><button class="btn ${good ? 'btn-success' : 'btn-primary'}" onclick="exitCombat()">${label}</button></div>`;
+  }
+
+  const sub = c.phase === 'opener' ? 'Standoff - pay, talk, or swing' : `Turn ${c.turn} - ${DISTRICTS[p.currentDistrict || HOME_DISTRICT]?.name || ''}`;
+  return `<div class="combat-screen screen-fade-enter">
+    <div class="screen-header"><div class="screen-header-titles"><div class="screen-header-eyebrow">${eyebrow}</div><div class="screen-header-title">${primary ? primary.name : 'Combat'}${liveCount > 1 ? ` +${liveCount - 1}` : ''}</div><div class="screen-header-sub">${sub}</div></div></div>
+    <div class="combat-body">
+      <div class="combatant-card">
+        <div class="combatant-name">You - rep ${p.reputation || 0}</div>
+        <div class="combatant-hp">${p.hp} / ${p.hpMax} HP</div>
+        ${pChipHTML}
+        <div class="bar-wrap"><div class="bar-fill hp ${pPct < 30 ? 'low' : ''}" style="width:${pPct}%"></div></div>
+      </div>
+      ${enemyCards}
+      <div class="combat-log">${logHTML}</div>
+    </div>
+    ${bar}
+  </div>`;
 }
 
 // ============================================================
@@ -249,26 +315,26 @@ function renderConfirmNewGameModal() {
 
 function renderCombatItemsModal() {
   const p = gameState.player;
-  const hasPearl  = (p.inventory.timePearl||0) > 0;
-  const hasMotion = (p.inventory.enhancementPowder||0) > 0;
-  const hasRewind = (p.inventory.rewind||0) > 0;
+  const inv = p.inventory;
   const deviceId  = p.equipment.device;
   const device    = deviceId ? (p.devicesCompleted||[]).find(d => d.id === deviceId) : null;
   const deviceCharges = device ? getDeviceChargesLeft(device) : 0;
   const dt = device ? DEVICE_TYPES[device.type] : null;
-  const canRewindDev = device && dt?.effect === 'rewind' && deviceCharges > 0;
   const snapCount = (gameState.combat.snapshots||[]).length;
-  const rewindLabel = snapCount > 0 ? `(${snapCount} turn${snapCount!==1?'s':''} back · +50% evade × 2 turns)` : '(no turns to rewind)';
+  const btn = (cond, cls, onclick, label) => cond ? `<button class="btn ${cls}" onclick="${onclick}">${label}</button>` : '';
   return `<div class="modal">
-    <div class="modal-title">Use an item</div>
-    <div class="modal-sub">Pick what to use this turn.</div>
+    <div class="modal-title">Answer the intent</div>
+    <div class="modal-sub">Items are free actions this turn. Attack, Blast, or Run end your turn.</div>
     <div class="modal-actions">
-      ${hasPearl  ? `<button class="btn btn-primary" onclick="closeModal();combatUseTimePearl()">⧖ Time Pearl (${p.inventory.timePearl}) — freeze enemy</button>` : ''}
-      ${hasMotion ? `<button class="btn btn-primary" onclick="closeModal();combatUseMotionPowder()">↯ Enhancement Powder (${p.inventory.enhancementPowder}) — extra attacks</button>` : ''}
-      ${hasRewind && snapCount > 0 ? `<button class="btn btn-primary" onclick="combatRewind()">⟲ Rewind (${p.inventory.rewind}) — ${rewindLabel}</button>` : ''}
-      ${hasRewind && snapCount === 0 ? `<button class="btn btn-secondary" disabled>⟲ Rewind — nothing to undo yet</button>` : ''}
-      ${device && deviceCharges > 0 ? `<button class="btn btn-primary" onclick="${dt?.effect === 'rewind' ? 'combatRewind()' : 'combatUseDevice()'}">${dt.symbol} ${dt.name} (${deviceCharges}/${device.chargesPerDay}) — ${dt.effect==='freeze'?'freeze enemy':dt.effect==='rewind'?rewindLabel:'extra attacks'}</button>` : ''}
-      ${device && deviceCharges <= 0 ? `<button class="btn btn-secondary" disabled>${dt.symbol} ${dt.name} — no charges today</button>` : ''}
+      ${btn((inv.timePearl||0)>0, 'btn-primary', "closeModal();combatUseTimePearl()", `&#9198; Time Pearl (${inv.timePearl}) &mdash; freeze a target (beats Heavy)`)}
+      ${btn((inv.shield||0)>0, 'btn-primary', "closeModal();combatUseShield()", `&#128737; Shield (${inv.shield}) &mdash; absorb next hits (beats Heavy/Grab)`)}
+      ${btn((inv.blast||0)>0, 'btn-primary', "closeModal();combatUseBlast()", `&#128165; Blast (${inv.blast}) &mdash; damage, ignores Brace (ends turn)`)}
+      ${btn((inv.enhancementPowder||0)>0, 'btn-secondary', "closeModal();combatUseEnhancement('speed')", `&#8623; Enhancement: Speed (${inv.enhancementPowder}) &mdash; extra attacks (beats Grab)`)}
+      ${btn((inv.enhancementPowder||0)>0, 'btn-secondary', "closeModal();combatUseEnhancement('strength')", `&#128170; Enhancement: Strength &mdash; big next hit`)}
+      ${btn((inv.healingBurst||0)>0, 'btn-primary', "closeModal();combatUseHeal()", `&#10010; Healing Burst (${inv.healingBurst}) &mdash; heal now`)}
+      ${(inv.rewind||0)>0 && snapCount>0 ? `<button class="btn btn-primary" onclick="combatRewind()">&#8634; Rewind (${inv.rewind}) &mdash; undo, +evade</button>` : ''}
+      ${(inv.rewind||0)>0 && snapCount===0 ? `<button class="btn btn-secondary" disabled>&#8634; Rewind &mdash; nothing to undo yet</button>` : ''}
+      ${device && deviceCharges>0 ? `<button class="btn btn-primary" onclick="${dt?.effect==='rewind'?'combatRewind()':'combatUseDevice()'}">${dt.symbol} ${dt.name} (${deviceCharges}/${device.chargesPerDay})</button>` : ''}
       <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
     </div>
   </div>`;
@@ -401,14 +467,22 @@ function renderSeedResultModal(data) {
 
 function renderCraftResultModal(data) {
   const r = RECIPES[data.recipeKey];
+  const effectDesc = {
+    timePearl:'freezes for', enhancementPowder:'grants power', blast:'hits for', shield:'absorbs', healingBurst:'heals', healingSalve:'restores', rewind:'undoes',
+  }[data.recipeKey] || 'power';
+  const unit = ['blast','healingBurst','healingSalve'].includes(data.recipeKey) ? ` ${data.power} HP`
+    : data.recipeKey === 'shield' ? ` ${data.power} hit${data.power>1?'s':''}`
+    : data.recipeKey === 'timePearl' ? ` ${data.power} turn${data.power>1?'s':''}`
+    : '';
+  const stock = gameState.player.inventory[data.recipeKey] || 0;
   return `<div class="modal">
     <div class="modal-title">${data.success ? '✅ Success' : '❌ Failed'}</div>
     <div class="modal-sub">${data.success
-      ? `You made a ${r.name}. Effect: ${data.power} frozen turn${data.power>1?'s':''}. The calc cost was worth it.`
+      ? `You made a ${r.name}${unit ? ` — ${effectDesc}${unit}` : ''}. The calc cost was worth it.`
       : `The calc dispersed. Nothing to show for it. James would be smug about this if he knew.`
     }</div>
     <div style="font-family:var(--font-ui);font-size:12px;color:var(--muted);margin-bottom:16px">
-      ${data.success ? `+20 crafting XP · Stock: ${gameState.player.inventory.timePearl} pearl${gameState.player.inventory.timePearl!==1?'s':''}` : ''}
+      ${data.success ? `+${r.xpReward} crafting XP · Stock: ${stock} ${r.name}${stock!==1?'s':''}` : ''}
     </div>
     <div class="modal-actions"><button class="btn btn-primary" onclick="closeModal()">Got it</button></div>
   </div>`;

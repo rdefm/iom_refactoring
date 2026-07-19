@@ -58,6 +58,21 @@ function migrateSave(s) {
     // Pre-M1 saves that already own the Archie vein have effectively done the tutorial
     s.flags.cultivateTutorialSeen = !!s.flags.archiePartnerSeen;
   }
+  // M2 field defaults (idempotent)
+  if (s.player) {
+    if (s.player.reputation === undefined)     s.player.reputation = 0;
+    if (s.player.fieldcraftSkill === undefined) s.player.fieldcraftSkill = 1;
+    if (s.player.fieldcraftXP === undefined)    s.player.fieldcraftXP = 0;
+    if (s.player.inventory) {
+      ['blast','shield','healingSalve','healingBurst'].forEach(k => {
+        if (s.player.inventory[k] === undefined) s.player.inventory[k] = 0;
+      });
+    }
+  }
+  // Any mid-fight save from the old combat model is unresolvable under Combat 2.0 — clear it
+  if (s.combat && (s.combat.enemy !== undefined || !Array.isArray(s.combat.enemies))) {
+    s.combat = { active:false, context:'raid', phase:'opener', veinId:null, enemies:[], log:[], outcome:null, onWin:null, turn:0, player:{ shield:0, evadeTurns:0, evadeChance:0, motionTurns:0, motionPower:0, strengthNext:0 }, snapshots:[], pendingReinforce:null };
+  }
   s.__version = SAVE_VERSION;
   return s;
 }
@@ -167,11 +182,12 @@ function doNewGame() {
   gameState.__version = SAVE_VERSION;
   gameState.player = {
     name:'Player', cash:40, hp:100, hpMax:100, attackMin:5, attackMax:12,
-    currentDistrict:HOME_DISTRICT,
-    orichalchum:{}, veins:[], inventory:{timePearl:0, enhancementPowder:0, rewind:0},
+    currentDistrict:HOME_DISTRICT, reputation:0,
+    orichalchum:{}, veins:[], inventory:{timePearl:0, enhancementPowder:0, rewind:0, blast:0, shield:0, healingSalve:0, healingBurst:0},
     equipment:{weapon:null, device:null}, items:[],
     craftingSkill:1, craftingXP:0,
     cultivatingSkill:1, cultivatingXP:0,
+    fieldcraftSkill:1, fieldcraftXP:0,
     devicesInProgress:[], devicesCompleted:[],
   };
   gameState.world = { day:1, timeBlock:0, timeBlocksDone:[], blocksSinceReset:0, sites:[], _siteId:1 };
@@ -181,7 +197,7 @@ function doNewGame() {
   gameState.sellState = {};
   gameState.archieChatStep = 0;
   gameState.statsOpen = false;
-  gameState.combat = { active:false, context:'raid', veinId:null, enemy:null, log:[], outcome:null, frozenTurns:0, motionTurns:0, motionPower:0, onWin:null, snapshots:[], evadeTurns:0, evadeChance:0 };
+  gameState.combat = { active:false, context:'raid', phase:'opener', veinId:null, enemies:[], log:[], outcome:null, onWin:null, turn:0, player:{ shield:0, evadeTurns:0, evadeChance:0, motionTurns:0, motionPower:0, strengthNext:0 }, snapshots:[], pendingReinforce:null };
   gameState.contacts = { archie:{relation:10,unlocked:true,recruited:false,recruitThreshold:80,craftingSkill:1,craftingXP:0,cultivatingSkill:1,cultivatingXP:0,assignedRoom:null}, james:{relation:0,unlocked:false,recruited:false,recruitThreshold:100,craftingSkill:1,craftingXP:0,cultivatingSkill:1,cultivatingXP:0,assignedRoom:null} };
   gameState.labThresholds    = {};
   gameState.veinStationVeins = [];

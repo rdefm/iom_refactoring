@@ -353,19 +353,17 @@ function renderInventoryScreen() {
       }).join('');
 
   // CONSUMABLES TAB
-  const pearlCount  = p.inventory.timePearl;
-  const motionCount = p.inventory.enhancementPowder;
-  const pearlCard  = pearlCount > 0 ? `<div class="item-card">
-    <div class="item-card-top"><div class="item-card-icon">⧖</div><div class="item-card-name">Time Pearl ×${pearlCount}</div></div>
-    <div class="item-card-desc">Throw at your feet in combat. Freezes the enemy for ${getCraftingEffectPower('timePearl')} turn${getCraftingEffectPower('timePearl')>1?'s':''}.</div>
-  </div>` : '';
-  const motionCard = motionCount > 0 ? `<div class="item-card">
-    <div class="item-card-top"><div class="item-card-icon">↯</div><div class="item-card-name">Enhancement Powder ×${motionCount}</div></div>
-    <div class="item-card-desc">Rub on skin before a fight. Attack ${getCraftingEffectPower('enhancementPowder')>=3?'three':' twice'} per turn for ${getCraftingEffectPower('enhancementPowder')>=3?2:1} turn${getCraftingEffectPower('enhancementPowder')>=3?'s':''}.</div>
-  </div>` : '';
-  const consumHTML = (!pearlCount && !motionCount)
+  const consumables = CONSUMABLE_KEYS.filter(k => (p.inventory[k] || 0) > 0);
+  const consumTotal = consumables.reduce((s, k) => s + (p.inventory[k] || 0), 0);
+  const consumHTML = consumables.length === 0
     ? '<div class="inv-empty">No consumables.<br>Craft some to get started.</div>'
-    : pearlCard + motionCard;
+    : consumables.map(k => {
+        const r = RECIPES[k];
+        return `<div class="item-card">
+          <div class="item-card-top"><div class="item-card-icon">${r.symbol}</div><div class="item-card-name">${r.name} ×${p.inventory[k]}</div></div>
+          <div class="item-card-desc">${r.description}</div>
+        </div>`;
+      }).join('');
 
   // EQUIPMENT TAB
   const equippedWeaponId = p.equipment.weapon;
@@ -450,7 +448,7 @@ function renderInventoryScreen() {
       <div class="screen-header-titles">
         <div class="screen-header-eyebrow">Stock</div>
         <div class="screen-header-title">Inventory</div>
-        <div class="screen-header-sub">${totalOre(p.orichalchum)} ore · ${pearlCount+motionCount} consumable${(pearlCount+motionCount)!==1?'s':''} · ${ownedItems.length} item${ownedItems.length!==1?'s':''}</div>
+        <div class="screen-header-sub">${totalOre(p.orichalchum)} ore · ${consumTotal} consumable${consumTotal!==1?'s':''} · ${ownedItems.length} item${ownedItems.length!==1?'s':''}</div>
       </div>
     </div>
     <div class="inventory-body">

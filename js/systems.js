@@ -404,11 +404,36 @@ function dailyTick() {
     const ore = ORE_TYPES[v.oreType];
     pushNotification('Your ' + ore.name + ' vein on ' + v.location.split(',')[0] + ' has dried up and disappeared.');
   });
+  // NPC raids on your veins (M2): daily roll per vein vs its security tier.
+  // Success steals charged ore — the demand side of vein-security spending.
+  rollVeinRaids(day);
+  // Reputation decays slowly toward zero — fame is perishable
+  if (day % 3 === 0 && (gameState.player.reputation || 0) > 0) gameState.player.reputation -= 1;
   // Process rooms
   if (gameState.home.rooms.includes('lab'))        processLab();
   if (gameState.home.rooms.includes('veinStation')) processVeinStation();
   // Reset device charges
   resetDeviceCharges();
+}
+
+// === NPC VEIN RAIDS (M2) ===
+function rollVeinRaids(day) {
+  const fx = getBarometerEffects();
+  gameState.player.veins.forEach(v => {
+    if (!v.charged) return; // nothing worth taking from an empty vein
+    const sec = SECURITY_TIERS.find(s => s.id === v.security) || SECURITY_TIERS[0];
+    const dMod = DISTRICTS[veinDistrict(v)]?.dangerMod || 0;
+    // base risk scales with district danger + vein level (visible value), minus security
+    let chance = 0.05 + dMod * 0.6 + (v.level - 1) * 0.02 + (fx.raidChance || 0) - sec.raidResist / 100;
+    chance = Math.max(0, Math.min(0.6, chance));
+    if (Math.random() >= chance) return;
+    // Success steals charged ore proportional to how little security resists
+    const ld = VEIN_LEVELS[v.level];
+    const resistFactor = 1 - sec.raidResist / 100;
+    const stolen = Math.max(1, Math.round(rand(ld.yieldCautious[0], ld.yieldCautious[1]) * resistFactor * getVeinYieldMult(v)));
+    v.charged = false; v.chargeBlocks = 0;
+    pushNotification(`⚠ Your ${ORE_TYPES[v.oreType].name} vein in ${DISTRICTS[veinDistrict(v)].name} was raided overnight — ${stolen} charged ore lost. ${sec.id === 'none' ? 'It has no security at all.' : `${sec.label} slowed them, not much.`}`);
+  });
 }
 function pushNotification(text) {
   gameState.notifications.push({ id: Date.now() + Math.random(), text });
@@ -803,9 +828,8 @@ function attemptCraft(recipeKey) {
   const success = Math.random() < getCraftingSuccessChance(recipeKey);
   if (success) {
     const power = getCraftingEffectPower(recipeKey);
-    if (recipeKey === 'timePearl')    gameState.player.inventory.timePearl++;
-    if (recipeKey === 'enhancementPowder') gameState.player.inventory.enhancementPowder = (gameState.player.inventory.enhancementPowder||0) + 1;
-    if (recipeKey === 'rewind')       gameState.player.inventory.rewind       = (gameState.player.inventory.rewind||0) + 1;
+    // recipeKey is also the inventory key for every consumable
+    gameState.player.inventory[recipeKey] = (gameState.player.inventory[recipeKey] || 0) + 1;
     awardCraftingXP(r.xpReward);
     openModal('craft_result', { recipeKey, success:true, power });
   } else {
@@ -901,28 +925,7 @@ function awardDeviceXP(device, amount) {
     pushNotification(`${dt.name} levelled up — now ${device.chargesPerDay} charges per day.`);
   }
 }
-function combatUseDevice() {
-  const p        = gameState.player;
-  const deviceId = p.equipment.device;
-  if (!deviceId) return;
-  const device = p.devicesCompleted.find(d => d.id === deviceId);
-  if (!device || getDeviceChargesLeft(device) <= 0) return;
-  device.chargesUsedToday = (device.chargesUsedToday||0) + 1;
-  awardDeviceXP(device, 10);
-  const dt = DEVICE_TYPES[device.type];
-  if (dt.effect === 'freeze') {
-    const power = RECIPES['timePearl'].effectPower[p.craftingSkill] || 1;
-    gameState.combat.frozenTurns += power;
-    gameState.combat.log.push(`You activate the ${dt.name}. Enemy frozen for ${power} turn${power>1?'s':''}.`);
-  } else if (dt.effect === 'motion') {
-    const power = RECIPES['enhancementPowder'].effectPower[p.craftingSkill] || 1;
-    gameState.combat.motionTurns += 2;
-    gameState.combat.motionPower  = power;
-    gameState.combat.log.push(`You activate the ${dt.name}. Movement accelerated.`);
-  }
-  closeModal();
-  renderGame();
-}
+// combatUseDevice is defined in the Combat 2.0 block below.
 
 // === SMS SYSTEM ===
 function sendSms1() {
@@ -1019,24 +1022,12 @@ function advanceHomeRaidIntro() {
 }
 
 function beginHomeRaidCombat() {
-  // 1 raider — fixed stats, challenging but beatable
-  const enemy = {
-    name:      'A raider',
-    hp:        35,
-    hpMax:     35,
-    attackMin: 6,
-    attackMax: 14,
-    veinRef:   null,
-    isMugging: false,
-  };
-  gameState.combat = {
-    active: true, context: 'home_raid', veinId: null, enemy,
-    log: [`They're in the flat. You've got the crowbar. This is happening.`],
-    outcome: null, frozenTurns: 0, motionTurns: 0, motionPower: 0,
-    onWin: 'homeRaidWon',
-  };
-  gameState.currentScreen = 'combat';
-  renderGame();
+  // A break-in at 3am — no standoff, you've already grabbed the crowbar.
+  const enemy = makeCombatant('mugger', { name: 'A raider', hpBonus: 6, atkBonus: 2 });
+  beginEncounter({
+    context: 'home_raid', enemies: [enemy], onWin: 'homeRaidWon', skipOpener: true,
+    intro: `They're in the flat. You've got the crowbar. This is happening.`,
+  });
 }
 
 function homeRaidWon() {
@@ -1194,16 +1185,15 @@ function processLab() {
   const thresholds = gameState.labThresholds || {};
   let totalAttempts = 0; let totalSuccesses = 0;
   Object.keys(RECIPES).forEach(key => {
-    if (key === 'timePearl'    && !gameState.flags.craftingUnlocked)    return;
     if (key === 'enhancementPowder' && !gameState.flags.enhancementPowderUnlocked) return;
-    if (key === 'rewind'       && !gameState.flags.craftingUnlocked)    return;
+    else if (key !== 'enhancementPowder' && !gameState.flags.craftingUnlocked)    return;
     const target = thresholds[key] || 0;
     if (target === 0) return;
     const r = RECIPES[key];
     const sk = c.craftingSkill || 1;
     const cost = Math.max(1, Math.round(r.baseCalcCost - (sk - 1) * 0.8));
-    const getInv = () => key === 'timePearl' ? (gameState.player.inventory.timePearl||0) : key === 'enhancementPowder' ? (gameState.player.inventory.enhancementPowder||0) : (gameState.player.inventory.rewind||0);
-    const addInv = () => { if (key === 'timePearl') gameState.player.inventory.timePearl++; else if (key === 'enhancementPowder') gameState.player.inventory.enhancementPowder = (gameState.player.inventory.enhancementPowder||0)+1; else gameState.player.inventory.rewind = (gameState.player.inventory.rewind||0)+1; };
+    const getInv = () => gameState.player.inventory[key] || 0;
+    const addInv = () => { gameState.player.inventory[key] = (gameState.player.inventory[key] || 0) + 1; };
     while (getInv() < target) {
       const hasCalc = r.ingredients.every(ing => (gameState.player.orichalchum[ing.type]||0) >= cost);
       if (!hasCalc) break;
@@ -1427,8 +1417,7 @@ function executeSale(items) {
       const pricePerUnit = CONSUMABLE_PRICES[item.type] || 30;
       gross += pricePerUnit * item.qty;
       consSold += item.qty;
-      if (item.type === 'timePearl')    gameState.player.inventory.timePearl    = Math.max(0, gameState.player.inventory.timePearl    - item.qty);
-      if (item.type === 'enhancementPowder') gameState.player.inventory.enhancementPowder = Math.max(0, gameState.player.inventory.enhancementPowder - item.qty);
+      gameState.player.inventory[item.type] = Math.max(0, (gameState.player.inventory[item.type] || 0) - item.qty);
     }
   });
   if (consSold > 0) {
@@ -1454,201 +1443,534 @@ function executeSale(items) {
     openModal('sale_result', { earned: playerCut, gross, mugged: false });
   }
 }
-function startMugging() {
-  const count = rand(1,3);
-  // Fixed stats — independent of player, but scales with group size
-  const enemy = {
-    name:      count === 1 ? 'A mugger' : `${count} muggers`,
-    hp:        28 * count,
-    hpMax:     28 * count,
-    attackMin: 4 + (count - 1) * 2,
-    attackMax: 10 + (count - 1) * 3,
-    veinRef:   null,
-    isMugging: true,
+// ============================================================
+// COMBAT 2.0 — negotiation openers + intent-telegraph combat.
+// Enemy-count-agnostic: combat.enemies is an array (content 1v1).
+// ============================================================
+
+let _combatantId = 0;
+function makeCombatant(templateId, opts = {}) {
+  const t = ENEMY_TEMPLATES[templateId];
+  const hp = rand(t.hpRange[0], t.hpRange[1]) + (opts.hpBonus || 0);
+  return {
+    id: 'c' + (++_combatantId), templateId, name: opts.name || t.name, tier: t.tier,
+    hp, hpMax: hp,
+    attackMin: t.attackRange[0] + (opts.atkBonus || 0),
+    attackMax: t.attackRange[1] + (opts.atkBonus || 0),
+    greed: t.greed, nerve: t.nerve, affinities: { ...t.affinities },
+    intents: t.intents, loot: t.loot, flavor: t.flavor,
+    intent: null, frozen: 0, enraged: 0, grabbedLoot: null,
+    intelKnown: false,
   };
-  gameState.combat = { active:true, context:'mugging', veinId:null, enemy, log:[`${enemy.name} step out of nowhere. They want what you're carrying.`], outcome:null, frozenTurns:0, motionTurns:0, motionPower:0, onWin:'muggingWon' };
-  closeModal(); gameState.currentScreen='combat'; renderGame();
+}
+
+// Value an onlooker can see you carrying — sets bribe thresholds and threat tier.
+function visibleCarryValue() {
+  const p = gameState.player;
+  let v = p.cash || 0;
+  ORE_TYPE_KEYS.forEach(k => v += (p.orichalchum[k] || 0) * (ORE_TYPES[k].basePrice || 40));
+  CONSUMABLE_KEYS.forEach(k => v += (p.inventory[k] || 0) * (CONSUMABLE_PRICES[k] || 40));
+  return Math.round(v);
+}
+function pickThreatTier(dangerMod, carry) {
+  let tier = 1;
+  if (carry > 350 || dangerMod >= 0.10) tier = 2;
+  if ((carry > 1200 && dangerMod >= 0.05) || dangerMod >= 0.18) tier = 3;
+  return tier;
+}
+function pickEnemyOfTier(tier) { return randFrom(TIER_POOLS[tier] || TIER_POOLS[1]); }
+
+function beginEncounter({ context, enemies, veinId = null, veinRef = null, onWin = null, intro, skipOpener = false }) {
+  gameState.combat = {
+    active: true, context, phase: skipOpener ? 'fight' : 'opener', veinId,
+    enemies, log: [intro], outcome: null, onWin, turn: 0,
+    player: { shield: 0, evadeTurns: 0, evadeChance: 0, motionTurns: 0, motionPower: 0, strengthNext: 0 },
+    snapshots: [], pendingReinforce: null,
+  };
+  gameState.combat._veinRef = veinRef; // transient (not snapshotted)
+  if (skipOpener) telegraphAll();
+  closeModal();
+  gameState.currentScreen = 'combat';
+  renderGame();
+}
+
+function startMugging() {
+  const dMod = DISTRICTS[gameState.player.currentDistrict || HOME_DISTRICT]?.dangerMod || 0;
+  const tier = pickThreatTier(dMod, visibleCarryValue());
+  const enemy = makeCombatant(pickEnemyOfTier(tier));
+  beginEncounter({
+    context: 'mugging', enemies: [enemy], onWin: 'muggingWon',
+    intro: `${enemy.name} steps out of nowhere. They want what you're carrying.`,
+  });
+}
+function startRaid(vein) {
+  const dMod = DISTRICTS[veinDistrict(vein)]?.dangerMod || 0;
+  const tier = Math.min(3, Math.max(1, pickThreatTier(dMod + 0.10, 500) ));
+  const enemy = makeCombatant(pickEnemyOfTier(tier), { hpBonus: (vein.level - 1) * 4, atkBonus: vein.level - 1 });
+  beginEncounter({
+    context: 'raid', enemies: [enemy], veinId: vein.id, veinRef: vein, onWin: 'raidWon',
+    intro: `You move in on the vein at ${vein.location}. ${enemy.name} steps out to meet you.`,
+  });
 }
 function muggingWon() {
   const earned = gameState._pendingSaleCut || 0;
   gameState._pendingSaleCut = 0;
   if (earned > 0) gameState.player.cash += earned;
-  openModal('sale_result', { earned, gross: earned * 2, mugged: true });
-}
-
-// === COMBAT SYSTEM ===
-function startRaid(vein) {
-  const template = vein.guardTemplate || randFrom(ENEMY_TEMPLATES);
-  const hpScale  = 1 + (vein.level-1)*0.3; const guards = Math.max(1,vein.guards);
-  const enemy = { name:guards>1?`${guards}× ${template.name}`:template.name,
-    hp:Math.round(template.hpBase*hpScale*guards), hpMax:Math.round(template.hpBase*hpScale*guards),
-    attackMin:template.attackMin, attackMax:template.attackMax+(vein.level-1), veinRef:vein, isMugging:false };
-  gameState.combat = { active:true, context:'raid', veinId:vein.id, enemy, log:[`You move in on the vein at ${vein.location}. ${enemy.name} steps out to meet you.`], outcome:null, frozenTurns:0, motionTurns:0, motionPower:0, onWin:'raidWon' };
-  closeModal(); gameState.currentScreen='combat'; renderGame();
+  gameState.combat._saleEarned = earned;
 }
 function raidWon() {
-  const vein = gameState.combat.enemy.veinRef;
-  if (vein) { vein.npcClaimed=false; vein.claimed=true; vein.guards=0; vein.guardTemplate=null; gameState.player.veins.push(vein); }
+  const vein = gameState.combat._veinRef;
+  if (vein) { vein.npcClaimed = false; vein.claimed = true; vein.guards = 0; vein.guardTemplate = null; gameState.player.veins.push(vein); }
 }
-function pushCombatSnapshot() {
-  const c = gameState.combat, p = gameState.player;
-  if (!c.enemy) return;
-  c.snapshots = (c.snapshots || []).slice(-1); // keep max 2 (push makes it 2)
-  c.snapshots.push({
-    playerHp:   p.hp,
-    enemyHp:    c.enemy.hp,
-    log:        [...c.log],
-    frozenTurns:c.frozenTurns,
-    motionTurns:c.motionTurns,
-    motionPower:c.motionPower,
-    evadeTurns: c.evadeTurns||0,
-    evadeChance:c.evadeChance||0,
-  });
+
+// ── NEGOTIATION OPENER (Layer 1) ─────────────────────────────
+function primaryEnemy() { return gameState.combat.enemies.find(e => e.hp > 0) || gameState.combat.enemies[0]; }
+function factionRelationBackup() {
+  // best relation among factions present where you are — a friendly line at your back
+  const d = DISTRICTS[gameState.player.currentDistrict || HOME_DISTRICT];
+  let best = 0;
+  (d?.factionPresence || []).forEach(fid => { if (gameState.factions[fid]?.joined) best = Math.max(best, 40); else best = Math.max(best, getFactionRelation(fid) * 0.3); });
+  return best;
 }
-function combatRewind() {
-  const c = gameState.combat, p = gameState.player;
-  if (!c.active || !(c.snapshots||[]).length) return;
-  // Check for rewind item (consumable or device)
-  const hasConsumable = (p.inventory.rewind||0) > 0;
-  const devId = p.equipment.device;
-  const rewindDev = devId ? (p.devicesCompleted||[]).find(d => d.id === devId && DEVICE_TYPES[d.type]?.effect === 'rewind') : null;
-  const hasDevice = rewindDev && getDeviceChargesLeft(rewindDev) > 0;
-  if (!hasConsumable && !hasDevice) return;
-  // Consume
-  if (hasConsumable) { p.inventory.rewind--; }
-  else { rewindDev.chargesUsedToday++; awardDeviceXP(rewindDev, 10); }
-  // Restore the oldest available snapshot (up to 2 turns back)
-  const snap = c.snapshots[0];
-  c.snapshots = [];
-  p.hp            = snap.playerHp;
-  c.enemy.hp      = snap.enemyHp;
-  c.log           = [...snap.log, '⟲ Time unspools. The moment resets. Only you remember.'];
-  c.frozenTurns   = snap.frozenTurns;
-  c.motionTurns   = snap.motionTurns;
-  c.motionPower   = snap.motionPower;
-  c.outcome       = null;
-  c.evadeTurns    = 2;
-  c.evadeChance   = 0.50;
-  closeModal();
+function talkChance(e) {
+  const rep = gameState.player.reputation || 0;
+  const base = 0.15 + rep / 200 + factionRelationBackup() / 200 - e.nerve / 300;
+  return Math.max(0.05, Math.min(0.9, base));
+}
+function bribeCost(e) {
+  const carry = visibleCarryValue();
+  return Math.max(20, Math.round((e.greed / 100) * (40 + carry * 0.04)));
+}
+function intimidateChance(e) {
+  const atk = getAttackRange();
+  const rep = gameState.player.reputation || 0;
+  const presence = (atk.min + atk.max) / 2 + rep * 0.4 + fieldcraftBonus() * 100;
+  const base = 0.15 + (presence - e.nerve) / 80;
+  return Math.max(0.05, Math.min(0.92, base));
+}
+function openerTalk() {
+  const c = gameState.combat; if (c.phase !== 'opener') return;
+  const e = primaryEnemy();
+  awardFieldcraftXP(6);
+  if (Math.random() < talkChance(e)) {
+    c.outcome = 'talked'; c.phase = 'over';
+    c.log.push(`You keep it calm and reasonable. ${e.name} weighs it up — and decides you're more trouble than you're worth.`);
+    awardReputation(1);
+    e.intelKnown = true;
+  } else {
+    c.log.push(`${e.name} isn't in a talking mood. "Bit late for chat, mate."`);
+    beginFight({ firstStrike: true });
+  }
   renderGame();
 }
-function combatPlayerAttack() {
-  const c = gameState.combat;
-  if (!c.active || c.outcome) return;
-  pushCombatSnapshot(); // snapshot state at start of player turn
-
-  // Determine how many attacks this turn
-  let attackCount = 1;
-  if (c.motionTurns > 0) {
-    attackCount = c.motionPower >= 3 ? 3 : 2;
-    const motionLabel = attackCount === 3 ? 'three times' : 'twice';
-    c.log.push(`Enhancement powder — you move ${motionLabel} as fast.`);
-  }
-
-  for (let i = 0; i < attackCount; i++) {
-    if (c.enemy.hp <= 0) break;
-    const atk = getAttackRange();
-    const dmg = rand(atk.min, atk.max);
-    c.enemy.hp = Math.max(0, c.enemy.hp - dmg);
-    const frozenNote = c.frozenTurns > 0 ? ' (enemy frozen)' : '';
-    const hitLabel = attackCount > 1 ? ` (hit ${i+1})` : '';
-    c.log.push(`You attack${hitLabel} — ${dmg} damage${frozenNote}. Enemy: ${c.enemy.hp}/${c.enemy.hpMax} HP.`);
-    if (c.enemy.hp <= 0) {
-      c.outcome = 'win';
-      c.log.push(c.context === 'mugging' ? `They leg it. Good call on their part.` : `They go down. Vein is yours.`);
-      if (c.onWin) window[c.onWin]();
-      renderGame(); return;
-    }
-  }
-
-  // Tick motion powder
-  if (c.motionTurns > 0) {
-    c.motionTurns--;
-    if (c.motionTurns === 0) c.log.push(`The powder wears off. Back to normal speed.`);
-  }
-
-  // Tick freeze and possibly enemy attacks
-  if (c.frozenTurns > 0) {
-    c.frozenTurns--;
-    if (c.frozenTurns === 0) c.log.push(`The time effect wears off. They're coming back round.`);
+function openerBribe() {
+  const c = gameState.combat; if (c.phase !== 'opener') return;
+  const e = primaryEnemy();
+  const cost = bribeCost(e);
+  if ((gameState.player.cash || 0) < cost) { c.log.push(`You can't cover what they'd want (£${cost}).`); renderGame(); return; }
+  gameState.player.cash -= cost;
+  awardFieldcraftXP(5);
+  // Rare low-nerve types take it and swing anyway
+  if (e.nerve < 20 && Math.random() < 0.3) {
+    c.log.push(`${e.name} pockets the £${cost} — and comes at you anyway. Should've known.`);
+    beginFight({ firstStrike: true });
   } else {
-    enemyAttack();
+    c.outcome = 'bribed'; c.phase = 'over';
+    c.log.push(`£${cost} changes hands. ${e.name} melts back into the evening. Transaction complete.`);
   }
+  renderGame();
+}
+function openerIntimidate() {
+  const c = gameState.combat; if (c.phase !== 'opener') return;
+  const e = primaryEnemy();
+  awardFieldcraftXP(7);
+  if (Math.random() < intimidateChance(e)) {
+    c.outcome = 'intimidated'; c.phase = 'over';
+    c.log.push(`You square up and hold their eye. ${e.name} does the maths, comes up short, and leaves.`);
+    awardReputation(3);
+  } else {
+    c.log.push(`${e.name} isn't buying it. If anything, you've annoyed them.`);
+    e.enraged = 1;
+    beginFight({ firstStrike: true });
+  }
+  renderGame();
+}
+function openerFight() { const c = gameState.combat; if (c.phase !== 'opener') return; beginFight({ firstStrike: false }); renderGame(); }
+
+function beginFight({ firstStrike }) {
+  const c = gameState.combat;
+  c.phase = 'fight';
+  telegraphAll();
+  if (firstStrike) {
+    c.log.push(`They move first.`);
+    c.enemies.forEach(e => { if (e.hp > 0) enemyAttackOne(e, 1, false, true); });
+    // re-telegraph after the free hit
+    c.enemies.forEach(e => { if (e.hp > 0 && e.frozen <= 0) telegraph(e); });
+    checkCombatEnd();
+  }
+}
+
+// ── INTENT TELEGRAPH ─────────────────────────────────────────
+function rollIntent(e) {
+  const pool = e.intents;
+  const total = pool.reduce((s, i) => s + i.w, 0);
+  let r = Math.random() * total;
+  for (const i of pool) { r -= i.w; if (r <= 0) return { ...INTENTS[i.type], ...(i.mult ? { mult: i.mult } : {}) }; }
+  return { ...INTENTS.swing };
+}
+function telegraph(e) { e.intent = rollIntent(e); }
+function telegraphAll() { gameState.combat.enemies.forEach(e => { if (e.hp > 0 && e.frozen <= 0) telegraph(e); }); }
+
+// ── PLAYER ACTIONS ───────────────────────────────────────────
+function hasManeuver(id) {
+  const m = FIELDCRAFT_MANEUVERS[id];
+  return m && (gameState.player.fieldcraftSkill || 1) >= m.level;
+}
+function fieldcraftBonus() { return Math.min(0.12, ((gameState.player.fieldcraftSkill || 1) - 1) * 0.03); }
+
+function combatPlayerAttack() {
+  const c = gameState.combat, p = gameState.player;
+  if (!c.active || c.outcome || c.phase !== 'fight') return;
+  pushCombatSnapshot();
+  let attacks = 1;
+  if (p.motionTurns > 0) {
+    attacks = p.motionPower >= 3 ? 3 : 2;
+    c.log.push(`Enhancement powder — you move ${attacks === 3 ? 'three times' : 'twice'} as fast.`);
+  }
+  for (let i = 0; i < attacks; i++) {
+    const tgt = c.enemies.find(e => e.hp > 0);
+    if (!tgt) break;
+    const atk = getAttackRange();
+    let dmg = Math.round(rand(atk.min, atk.max) * (1 + fieldcraftBonus())) + (p.strengthNext || 0);
+    const braced = tgt.intent?.id === 'brace';
+    if (braced) dmg = hasManeuver('press') ? Math.round(dmg * 1.2) : Math.round(dmg * 0.5);
+    tgt.hp = Math.max(0, tgt.hp - dmg);
+    c.log.push(`You attack${attacks > 1 ? ` (hit ${i + 1})` : ''} — ${dmg} damage${braced ? (hasManeuver('press') ? ' (Press — through the brace)' : ' (they braced — halved)') : ''}. ${tgt.name}: ${tgt.hp}/${tgt.hpMax}.`);
+    if (tgt.hp <= 0) { returnGrabbedLoot(tgt); c.log.push(`${tgt.name} goes down.`); }
+  }
+  p.strengthNext = 0;
+  if (p.motionTurns > 0) { p.motionTurns--; if (p.motionTurns === 0) c.log.push(`The powder wears off. Back to normal speed.`); }
+  if (!c.enemies.some(e => e.hp > 0)) { winCombat(); return; }
+  enemiesResolve();
   renderGame();
 }
 function combatFlee() {
   const c = gameState.combat;
-  if (!c.active||c.outcome) return;
-  if (Math.random()>0.35) { c.outcome='fled'; c.log.push('You back off sharpish. Probably the right call.'); }
-  else { c.log.push('You try to leg it — they get a parting shot in.'); enemyAttack(); }
+  if (!c.active || c.outcome || c.phase !== 'fight') return;
+  pushCombatSnapshot();
+  const evadeHelp = (gameState.player.motionTurns > 0) ? 0.2 : 0;
+  if (Math.random() > 0.35 - evadeHelp) {
+    c.outcome = 'fled'; c.phase = 'over';
+    c.log.push('You back off sharpish. Probably the right call.');
+    awardFieldcraftXP(8);
+  } else {
+    c.log.push('You try to leg it — they get a parting shot in.');
+    c.enemies.forEach(e => { if (e.hp > 0) enemyAttackOne(e, 1, false, true); });
+    checkCombatEnd();
+  }
   renderGame();
 }
+
+// Consumables are free "answers" — they set up your turn; Attack/Blast/Flee end it.
 function combatUseTimePearl() {
-  const c = gameState.combat;
-  if (!c.active || c.outcome || gameState.player.inventory.timePearl <= 0) return;
-  if (c.frozenTurns > 0) { c.log.push('Already frozen. Save the pearl.'); renderGame(); return; }
-  gameState.player.inventory.timePearl--;
+  const c = gameState.combat, p = gameState.player;
+  if (!c.active || c.outcome || c.phase !== 'fight' || (p.inventory.timePearl || 0) <= 0) return;
+  const tgt = primaryEnemy();
+  if (tgt.frozen > 0) { c.log.push('Already frozen. Save the pearl.'); renderGame(); return; }
+  p.inventory.timePearl--;
   const power = getCraftingEffectPower('timePearl');
-  c.frozenTurns = power;
-  c.log.push(`You throw a time pearl. The air goes thick. Everything slows. (${power} turn${power>1?'s':''})`);
+  tgt.frozen = power; tgt.intent = null;
+  c.log.push(`You throw a time pearl at ${tgt.name}. The air goes thick. (${power} turn${power > 1 ? 's' : ''} frozen)`);
   renderGame();
 }
-function combatUseMotionPowder() {
-  const c = gameState.combat;
-  if (!c.active || c.outcome || gameState.player.inventory.enhancementPowder <= 0) return;
-  if (c.motionTurns > 0) { c.log.push('Already moving fast. Wait for it to wear off.'); renderGame(); return; }
-  gameState.player.inventory.enhancementPowder--;
+function combatUseEnhancement(mode) {
+  const c = gameState.combat, p = gameState.player;
+  if (!c.active || c.outcome || c.phase !== 'fight' || (p.inventory.enhancementPowder || 0) <= 0) return;
+  p.inventory.enhancementPowder--;
   const power = getCraftingEffectPower('enhancementPowder');
-  // power 1-2 = attack twice for 1-2 turns; power 3 = attack 3x for 2 turns
-  c.motionPower  = power;
-  c.motionTurns  = power >= 3 ? 2 : 1;
-  c.log.push(`You rub the powder in. The world slows slightly around you. You feel very fast.`);
+  if (mode === 'strength') {
+    p.strengthNext = 4 + power * 3;
+    c.log.push(`Strength variant — your next hit lands like a bus. (+${p.strengthNext} damage)`);
+  } else {
+    p.motionPower = power; p.motionTurns = power >= 3 ? 2 : 1;
+    c.log.push(`Speed variant — the world slows slightly around you. You feel very fast.`);
+  }
+  renderGame();
+}
+function combatUseShield() {
+  const c = gameState.combat, p = gameState.player;
+  if (!c.active || c.outcome || c.phase !== 'fight' || (p.inventory.shield || 0) <= 0) return;
+  p.inventory.shield--;
+  const power = getCraftingEffectPower('shield');
+  p.shield = Math.max(p.shield, power);
+  c.log.push(`You brace a physics shield. Absorbs the next ${power} hit${power > 1 ? 's' : ''}; momentum declines to arrive.`);
+  renderGame();
+}
+function combatUseHeal() {
+  const c = gameState.combat, p = gameState.player;
+  if (!c.active || c.outcome || c.phase !== 'fight' || (p.inventory.healingBurst || 0) <= 0) return;
+  p.inventory.healingBurst--;
+  const amt = getCraftingEffectPower('healingBurst');
+  p.hp = Math.min(p.hpMax, p.hp + amt);
+  c.log.push(`Healing burst — time queues the recovery. +${amt} HP. You: ${p.hp}/${p.hpMax}.`);
+  renderGame();
+}
+function combatUseBlast() {
+  const c = gameState.combat, p = gameState.player;
+  if (!c.active || c.outcome || c.phase !== 'fight' || (p.inventory.blast || 0) <= 0) return;
+  pushCombatSnapshot();
+  p.inventory.blast--;
+  const tgt = primaryEnemy();
+  const dmg = getCraftingEffectPower('blast');
+  tgt.hp = Math.max(0, tgt.hp - dmg);
+  c.log.push(`💥 Blast — ${dmg} kinetic damage, straight through any brace. ${tgt.name}: ${tgt.hp}/${tgt.hpMax}.`);
+  if (tgt.hp <= 0) { returnGrabbedLoot(tgt); c.log.push(`${tgt.name} goes down.`); }
+  if (!c.enemies.some(e => e.hp > 0)) { winCombat(); return; }
+  enemiesResolve();
+  renderGame();
+}
+function combatUseDevice() {
+  const p = gameState.player, c = gameState.combat;
+  const deviceId = p.equipment.device;
+  if (!deviceId) return;
+  const device = p.devicesCompleted.find(d => d.id === deviceId);
+  if (!device || getDeviceChargesLeft(device) <= 0) return;
+  const dt = DEVICE_TYPES[device.type];
+  if (dt.effect === 'freeze') {
+    const tgt = primaryEnemy(); if (!tgt) return;
+    device.chargesUsedToday++; awardDeviceXP(device, 10);
+    const power = RECIPES['timePearl'].effectPower[p.craftingSkill] || 1;
+    tgt.frozen += power; tgt.intent = null;
+    c.log.push(`You activate the ${dt.name}. ${tgt.name} frozen for ${power} turn${power > 1 ? 's' : ''}.`);
+  } else if (dt.effect === 'motion') {
+    device.chargesUsedToday++; awardDeviceXP(device, 10);
+    const power = RECIPES['enhancementPowder'].effectPower[p.craftingSkill] || 1;
+    p.motionTurns += 2; p.motionPower = power;
+    c.log.push(`You activate the ${dt.name}. Movement accelerated.`);
+  }
+  closeModal();
   renderGame();
 }
 function combatUseItem() {
   const c = gameState.combat;
-  if (!c.active || c.outcome) return;
-  const p = gameState.player;
-  const hasPearl   = (p.inventory.timePearl||0)   > 0;
-  const hasMotion  = (p.inventory.enhancementPowder||0) > 0;
-  const hasRewind  = (p.inventory.rewind||0)       > 0;
-  const devId      = p.equipment.device;
-  const dev        = devId ? (p.devicesCompleted||[]).find(d => d.id === devId) : null;
-  const hasDevice  = dev && getDeviceChargesLeft(dev) > 0;
-  const hasRewindDev = dev && DEVICE_TYPES[dev.type]?.effect === 'rewind' && hasDevice;
-  const totalItems = [hasPearl,hasMotion,hasRewind,hasDevice].filter(Boolean).length;
-  if (totalItems === 0) { c.log.push('You rummage in your pockets. Nothing useful. Classic.'); renderGame(); return; }
-  if (totalItems === 1) {
-    if (hasPearl)      { combatUseTimePearl();   return; }
-    if (hasMotion)     { combatUseMotionPowder(); return; }
-    if (hasRewind)     { openModal('combat_items',{}); return; } // open modal for confirm
-    if (hasDevice)     { combatUseDevice();       return; }
-  }
+  if (!c.active || c.outcome || c.phase !== 'fight') return;
   openModal('combat_items', {});
 }
-function enemyAttack() {
-  const c = gameState.combat;
-  if (c.outcome||c.frozenTurns>0) return;
-  // Evade check
-  if ((c.evadeTurns||0) > 0) {
-    c.evadeTurns--;
-    if (Math.random() < (c.evadeChance||0)) {
-      c.log.push(`${c.enemy.name} swings — you're not there. ${c.evadeTurns > 0 ? c.evadeTurns + ' evade turn' + (c.evadeTurns!==1?'s':'') + ' left.' : 'Evade fades.'}`);
-      return;
+
+// ── ENEMY RESOLUTION ─────────────────────────────────────────
+function enemiesResolve() {
+  const c = gameState.combat, p = gameState.player;
+  c.turn++;
+  c.enemies.forEach(e => {
+    if (e.hp <= 0) return;
+    if (e.frozen > 0) { e.frozen--; if (e.frozen === 0) { c.log.push(`${e.name} shakes off the freeze.`); telegraph(e); } return; }
+    resolveIntent(e);
+    if (p.hp <= 0) return;
+  });
+  // Call reinforcement countdown
+  if (c.pendingReinforce) {
+    c.pendingReinforce.turnsLeft--;
+    if (c.pendingReinforce.turnsLeft <= 0) {
+      const add = makeCombatant(c.pendingReinforce.templateId);
+      telegraph(add);
+      c.enemies.push(add);
+      c.log.push(`Backup arrives: ${add.name} joins the fight.`);
+      c.pendingReinforce = null;
     }
   }
-  const dmg = rand(c.enemy.attackMin, c.enemy.attackMax);
-  gameState.player.hp = Math.max(0, gameState.player.hp-dmg);
-  c.log.push(`${c.enemy.name} hits you for ${dmg}. You: ${gameState.player.hp}/${gameState.player.hpMax} HP.`);
-  if (gameState.player.hp<=0) { c.outcome='loss'; c.log.push('You\'re done. You come round somewhere unpleasant.'); gameState.player.hp=Math.round(gameState.player.hpMax*0.3); }
+  // Player evade decays per round
+  if (p.evadeTurns > 0) { p.evadeTurns--; if (p.evadeTurns === 0) p.evadeChance = 0; }
+  // Re-telegraph living, unfrozen enemies for the next exchange
+  c.enemies.forEach(e => { if (e.hp > 0 && e.frozen <= 0) telegraph(e); });
+  // Remove any that bolted
+  c.enemies = c.enemies.filter(e => !e._gone);
+  checkCombatEnd();
 }
+function resolveIntent(e) {
+  const c = gameState.combat;
+  const intent = e.intent?.id || 'swing';
+  switch (intent) {
+    case 'brace': c.log.push(`${e.name} stays braced.`); break;
+    case 'call':
+      if (!c.pendingReinforce) {
+        c.pendingReinforce = { turnsLeft: 2, templateId: pickEnemyOfTier(Math.max(1, e.tier - 1)) };
+        c.log.push(`${e.name} calls it in. Backup two turns out — end this fast.`);
+      } else { enemyAttackOne(e, 1, false); }
+      break;
+    case 'bolt':
+      c.log.push(`${e.name} bolts${e.grabbedLoot ? ` — and keeps what they grabbed` : ''}. Gone.`);
+      e._gone = true;
+      break;
+    case 'grab':  enemyAttackOne(e, 1, true); break;
+    case 'heavy': enemyAttackOne(e, e.intent.mult || 2.2, false); break;
+    case 'swing': default: enemyAttackOne(e, 1, false); break;
+  }
+}
+function enemyAttackOne(e, mult, isGrab, firstStrike) {
+  const c = gameState.combat, p = gameState.player;
+  const label = INTENTS[e.intent?.id]?.label?.toLowerCase() || 'hit';
+  // Evade
+  if (p.evadeTurns > 0 && Math.random() < p.evadeChance) {
+    c.log.push(`${e.name} ${label}s — you're not there.`);
+    return;
+  }
+  // Shield absorbs a whole hit and negates contact (so no grab)
+  if (p.shield > 0) {
+    p.shield--;
+    c.log.push(`Your shield eats ${e.name}'s ${label}. (${p.shield} left)`);
+    return;
+  }
+  let dmg = Math.round(rand(e.attackMin, e.attackMax) * mult);
+  if (e.enraged) { dmg = Math.round(dmg * 1.3); }
+  dmg = resolveDamageToPlayer(dmg, e);
+  p.hp = Math.max(0, p.hp - dmg);
+  c.log.push(`${e.name} ${firstStrike ? 'gets a free ' + label + ' in' : label + 's'} for ${dmg}. You: ${p.hp}/${p.hpMax}.`);
+  if (isGrab && p.hp > 0) doGrab(e);
+  if (p.hp <= 0) { loseCombat(); }
+}
+// Affinity pipeline seam — player affinity profile lands in M3; enemy affinities
+// already ride on templates. For now this is a pass-through.
+function resolveDamageToPlayer(dmg, e) { return dmg; }
+function doGrab(e) {
+  const p = gameState.player, c = gameState.combat;
+  const loot = e.grabbedLoot || { cash: 0, ore: {} };
+  if ((p.cash || 0) > 0) {
+    const take = Math.min(p.cash, rand(10, 40));
+    p.cash -= take; loot.cash += take;
+    c.log.push(`${e.name} snatches £${take} off you.`);
+  } else {
+    const types = ORE_TYPE_KEYS.filter(k => (p.orichalchum[k] || 0) > 0);
+    if (types.length) {
+      const k = randFrom(types); const take = Math.min(p.orichalchum[k], rand(2, 8));
+      p.orichalchum[k] -= take; loot.ore[k] = (loot.ore[k] || 0) + take;
+      c.log.push(`${e.name} grabs ${take} ${ORE_TYPES[k].name}.`);
+    }
+  }
+  e.grabbedLoot = loot;
+}
+function returnGrabbedLoot(e) {
+  if (!e.grabbedLoot) return;
+  const p = gameState.player;
+  p.cash += e.grabbedLoot.cash || 0;
+  Object.entries(e.grabbedLoot.ore || {}).forEach(([k, v]) => p.orichalchum[k] = (p.orichalchum[k] || 0) + v);
+  if ((e.grabbedLoot.cash || 0) > 0 || Object.keys(e.grabbedLoot.ore || {}).length) {
+    gameState.combat.log.push(`You take your things back off ${e.name}.`);
+  }
+  e.grabbedLoot = null;
+}
+function checkCombatEnd() {
+  const c = gameState.combat;
+  if (c.outcome) return;
+  if (!c.enemies.some(e => e.hp > 0 || (!e._gone))) { winCombat(); return; }
+  if (!c.enemies.length) { winCombat(); return; }
+  if (gameState.player.hp <= 0) { loseCombat(); }
+}
+function winCombat() {
+  const c = gameState.combat;
+  if (c.outcome) return;
+  c.outcome = 'win'; c.phase = 'over';
+  c.log.push(c.context === 'mugging' ? `They're down. You keep what's yours.` : `Down. The vein's yours.`);
+  const topTier = Math.max(1, ...c.enemies.map(e => e.tier || 1));
+  awardReputation(2 * topTier);
+  awardFieldcraftXP(18 + topTier * 6);
+  if (c.onWin) window[c.onWin]();
+  renderGame();
+}
+function loseCombat() {
+  const c = gameState.combat;
+  if (c.outcome) return;
+  c.outcome = 'loss'; c.phase = 'over';
+  c.log.push(`You're done. You come round somewhere unpleasant.`);
+  gameState.player.hp = Math.round(gameState.player.hpMax * 0.3);
+  awardFieldcraftXP(6);
+  renderGame();
+}
+
+// ── FIELDCRAFT & REPUTATION ──────────────────────────────────
+function awardFieldcraftXP(amount) {
+  const p = gameState.player;
+  p.fieldcraftXP = (p.fieldcraftXP || 0) + amount;
+  const max = FIELDCRAFT_XP_LEVELS.length - 1;
+  while ((p.fieldcraftSkill || 1) < max && p.fieldcraftXP >= FIELDCRAFT_XP_LEVELS[(p.fieldcraftSkill || 1) + 1]) {
+    p.fieldcraftSkill = (p.fieldcraftSkill || 1) + 1;
+    pushNotification(`Fieldcraft up — now level ${p.fieldcraftSkill}.`);
+    const unlocked = Object.values(FIELDCRAFT_MANEUVERS).find(m => m.level === p.fieldcraftSkill);
+    if (unlocked) pushNotification(`Maneuver unlocked: ${unlocked.name} — ${unlocked.blurb}`);
+  }
+}
+function awardReputation(amount) {
+  const p = gameState.player;
+  p.reputation = Math.max(0, Math.min(100, (p.reputation || 0) + amount));
+}
+
+// ── SNAPSHOT / REWIND (Combat 2.0) ───────────────────────────
+function pushCombatSnapshot() {
+  const c = gameState.combat;
+  if (!c.enemies) return;
+  c.snapshots = (c.snapshots || []).slice(-1); // keep max 2 frames
+  c.snapshots.push(JSON.parse(JSON.stringify({
+    playerHp: gameState.player.hp,
+    playerCash: gameState.player.cash,
+    orichalchum: gameState.player.orichalchum,
+    inventory: gameState.player.inventory,
+    enemies: c.enemies,
+    log: c.log,
+    player: c.player,
+    turn: c.turn,
+    pendingReinforce: c.pendingReinforce,
+  })));
+}
+function combatRewind() {
+  const c = gameState.combat, p = gameState.player;
+  if (!c.active || !(c.snapshots || []).length) return;
+  const hasConsumable = (p.inventory.rewind || 0) > 0;
+  const devId = p.equipment.device;
+  const rewindDev = devId ? (p.devicesCompleted || []).find(d => d.id === devId && DEVICE_TYPES[d.type]?.effect === 'rewind') : null;
+  const hasDevice = rewindDev && getDeviceChargesLeft(rewindDev) > 0;
+  if (!hasConsumable && !hasDevice) return;
+  if (hasConsumable) p.inventory.rewind--;
+  else { rewindDev.chargesUsedToday++; awardDeviceXP(rewindDev, 10); }
+  const snap = c.snapshots[0];
+  c.snapshots = [];
+  p.hp = snap.playerHp;
+  p.cash = snap.playerCash;
+  p.orichalchum = snap.orichalchum;
+  p.inventory = snap.inventory;
+  c.enemies = snap.enemies;
+  c.log = [...snap.log, '⟲ Time unspools. The moment resets. Only you remember.'];
+  c.player = snap.player;
+  c.turn = snap.turn;
+  c.pendingReinforce = snap.pendingReinforce;
+  c.outcome = null; c.phase = 'fight';
+  c.player.evadeTurns = 2; c.player.evadeChance = 0.5;
+  closeModal();
+  renderGame();
+}
+
 function exitCombat() {
   const c = gameState.combat;
-  const outcome = c.outcome; const ctx = c.context;
-  gameState.combat = { active:false, context:'raid', veinId:null, enemy:null, log:[], outcome:null, frozenTurns:0, motionTurns:0, motionPower:0, onWin:null, snapshots:[], evadeTurns:0, evadeChance:0 };
-  if (ctx==='mugging' && outcome==='win') { /* sale_result modal already opened by muggingWon */ return; }
-  if (ctx==='home_raid') { afterHomeRaidCombat(outcome); return; }
-  gameState.currentScreen = outcome==='win'&&ctx==='raid' ? 'inventory' : 'home';
+  const outcome = c.outcome, ctx = c.context;
+  const saleEarned = c._saleEarned || 0;
+  gameState.combat = {
+    active: false, context: 'raid', phase: 'opener', veinId: null, enemies: [], log: [], outcome: null,
+    onWin: null, turn: 0, player: { shield: 0, evadeTurns: 0, evadeChance: 0, motionTurns: 0, motionPower: 0, strengthNext: 0 }, snapshots: [], pendingReinforce: null,
+  };
+  if (ctx === 'home_raid') { afterHomeRaidCombat(outcome); return; }
+  if (ctx === 'mugging') {
+    // Any non-loss resolution means you completed the sale on the walk
+    if (outcome !== 'loss') {
+      const earned = outcome === 'win' ? saleEarned : (gameState._pendingSaleCut || 0);
+      gameState._pendingSaleCut = 0;
+      if (outcome !== 'win' && earned > 0) gameState.player.cash += earned;
+      openModal('sale_result', { earned, gross: earned * 2, mugged: true });
+    } else {
+      gameState._pendingSaleCut = 0;
+      gameState.currentScreen = 'home';
+    }
+    renderGame();
+    return;
+  }
+  gameState.currentScreen = outcome === 'win' && ctx === 'raid' ? 'inventory' : 'home';
   renderGame();
 }
 

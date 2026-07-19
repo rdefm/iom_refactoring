@@ -39,12 +39,6 @@ const SECURITY_TIERS = [
   { id: 'guarded', label: 'Hired Guard', raidResist: 55, cost: 120 },
 ];
 
-const ENEMY_TEMPLATES = [
-  { name: 'Territorial Scrapper', hpBase: 20, attackMin: 3, attackMax: 8  },
-  { name: 'Vein Guard',           hpBase: 30, attackMin: 4, attackMax: 10 },
-  { name: 'Orichalchum Dealer',   hpBase: 25, attackMin: 5, attackMax: 12 },
-];
-
 // Thugs scale to player HP (mugging encounters)
 const THUG_NAMES = ['a bloke in a puffer jacket', 'some lad who definitely does this a lot', 'a man with very little to lose'];
 
@@ -552,4 +546,117 @@ const FACTION_LINES = {
   guild:      { route:['hampstead','kingsx','city','greenwich'],         veins:{ hampstead:2, kingsx:1, city:1, greenwich:2 } },
   network:    { route:['soho','kingsx','whitechapel'],                   veins:{ kingsx:2, whitechapel:1 } },
   conclave:   { route:['soho','city'],                                   veins:{ city:2 } },
+};
+
+// ============================================================
+// M2 — COMBAT 2.0: INTENTS, ENEMIES, CONSUMABLES, FIELDCRAFT
+// ============================================================
+
+// Intent telegraphs (§11 Layer 2). Each enemy turn shows its next move; the
+// player's turn is about answering it. `answers` is UI hint text only.
+const INTENTS = {
+  swing: { id:'swing', label:'Swing',  icon:'⚔', line:'Winds up for a straight shot.',      answers:'Trade blows.' },
+  heavy: { id:'heavy', label:'Heavy',  icon:'🔨', line:'Loading up something that will hurt.', answers:'Freeze it, Shield it, or race it.', mult:2.2 },
+  grab:  { id:'grab',  label:'Grab',   icon:'🖐', line:'Reaching for what you\'re carrying.',  answers:'Kill it first (Speed), or Shield the contact.' },
+  brace: { id:'brace', label:'Brace',  icon:'🛡', line:'Braced. Halves what you land.',        answers:'Don\'t waste big hits — Blast ignores it.' },
+  call:  { id:'call',  label:'Call',   icon:'📣', line:'Calling for backup. Two turns out.',   answers:'End it now.' },
+  bolt:  { id:'bolt',  label:'Bolt',   icon:'🏃', line:'About to leg it — with anything grabbed.', answers:'Last chance to drop them.' },
+};
+
+// Enemy templates across threat tiers T1–T3. Enemies never scale to player
+// level — only to district danger and visible value (§3b). affinities are
+// sparse; resolve() honours them (matters more once emotion/fate items land).
+const ENEMY_TEMPLATES = {
+  mugger:        { id:'mugger',        name:'Mugger',                 tier:1, hpRange:[24,32],  attackRange:[4,9],
+    intents:[{type:'swing',w:50},{type:'heavy',w:15},{type:'grab',w:20},{type:'bolt',w:15}],
+    greed:30, nerve:25, affinities:{}, loot:{cash:[10,40]},
+    flavor:['He has the air of a man whose gym membership just lapsed.'] },
+  chancer:       { id:'chancer',       name:'Chancer',                tier:1, hpRange:[18,26],  attackRange:[3,7],
+    intents:[{type:'swing',w:45},{type:'grab',w:25},{type:'bolt',w:30}],
+    greed:45, nerve:15, affinities:{}, loot:{cash:[5,25]},
+    flavor:['Half opportunist, half coward, entirely inconvenient.'] },
+  scrapper:      { id:'scrapper',      name:'Territorial Scrapper',   tier:2, hpRange:[30,42],  attackRange:[5,11],
+    intents:[{type:'swing',w:45},{type:'heavy',w:25},{type:'brace',w:30}],
+    greed:20, nerve:45, affinities:{}, loot:{cash:[15,50]},
+    flavor:['This is his corner. He has opinions about his corner.'] },
+  thief:         { id:'thief',         name:'Organised Thief',        tier:2, hpRange:[26,36],  attackRange:[4,9],
+    intents:[{type:'grab',w:40},{type:'swing',w:25},{type:'bolt',w:25},{type:'heavy',w:10}],
+    greed:60, nerve:35, affinities:{}, loot:{cash:[20,60]},
+    flavor:['Does this for a living, and it shows — mostly in the footwear.'] },
+  junkieCrew:    { id:'junkieCrew',    name:'Junkie Crew',            tier:2, hpRange:[34,48],  attackRange:[4,10], group:true,
+    intents:[{type:'grab',w:35},{type:'swing',w:30},{type:'bolt',w:20},{type:'call',w:15}],
+    greed:55, nerve:20, affinities:{}, loot:{cash:[10,45]},
+    flavor:['Unpredictable, which is the whole problem with them.'] },
+  dealer:        { id:'dealer',        name:'Orichalchum Dealer',     tier:2, hpRange:[28,40],  attackRange:[5,12],
+    intents:[{type:'heavy',w:30},{type:'grab',w:30},{type:'swing',w:25},{type:'brace',w:15}],
+    greed:50, nerve:50, affinities:{time:'resistant'}, loot:{cash:[30,80]},
+    flavor:['Knows exactly what your ore is worth, which is the problem.'] },
+  enforcerFirm:  { id:'enforcerFirm',  name:'Firm Enforcer',          tier:3, hpRange:[44,58],  attackRange:[7,14],
+    intents:[{type:'brace',w:30},{type:'call',w:20},{type:'heavy',w:25},{type:'swing',w:25}],
+    greed:15, nerve:70, affinities:{physics:'attuned'}, loot:{cash:[40,110]},
+    flavor:['Professional. Unhurried. Been told exactly who you are.'] },
+  enforcerColl:  { id:'enforcerColl',  name:'Collective Enforcer',    tier:3, hpRange:[40,54],  attackRange:[6,13],
+    intents:[{type:'swing',w:30},{type:'call',w:25},{type:'grab',w:20},{type:'heavy',w:25}],
+    greed:25, nerve:65, affinities:{emotion:'resistant'}, loot:{cash:[35,95]},
+    flavor:['Not angry. Which is somehow worse than angry.'] },
+};
+// Which enemies can appear at a given threat tier (geography/visibility-gated)
+const TIER_POOLS = {
+  1: ['mugger','chancer'],
+  2: ['scrapper','thief','junkieCrew','dealer'],
+  3: ['enforcerFirm','enforcerColl'],
+};
+
+// New consumables (first wave). Combination recipes list two ingredient types.
+const M2_RECIPES = {
+  blast: {
+    name:'Blast', symbol:'💥',
+    description:'Physics-type. Direct kinetic damage that ignores a Braced stance. The subtlety-free option.',
+    ingredients:[{ type:'physics', baseQty:5 }], baseSuccess:0.42, baseCalcCost:5,
+    effectPower:[0, 14, 18, 22, 27, 33], xpReward:22, combat:'blast',
+  },
+  shield: {
+    name:'Shield', symbol:'🛡',
+    description:'Physics-type. Absorbs the next 1–2 incoming hits and negates Heavy/Grab contact. Momentum simply declines to arrive.',
+    ingredients:[{ type:'physics', baseQty:5 }], baseSuccess:0.42, baseCalcCost:5,
+    effectPower:[0, 1, 1, 2, 2, 2], xpReward:22, combat:'shield',
+  },
+  healingSalve: {
+    name:'Healing Salve', symbol:'✚',
+    description:'Life-type. Rubbed in before sleep — recovers HP faster overnight. Out-of-combat only.',
+    ingredients:[{ type:'life', baseQty:5 }], baseSuccess:0.45, baseCalcCost:5,
+    effectPower:[0, 12, 16, 20, 26, 32], xpReward:20, combat:null, restHeal:true,
+  },
+  healingBurst: {
+    name:'Healing Burst', symbol:'✚⧖',
+    description:'Time + Life. In-combat heal — faster than a salve because time does the queuing. The first combination craft.',
+    ingredients:[{ type:'time', baseQty:4 }, { type:'life', baseQty:4 }], baseSuccess:0.34, baseCalcCost:4,
+    effectPower:[0, 14, 18, 24, 30, 38], xpReward:40, combat:'heal', combo:true,
+  },
+};
+
+// Fieldcraft — the light-stat third skill (§3b). XP from fights, negotiations,
+// escapes. Small permanent bonuses (hard-capped ±15%) + maneuver unlocks.
+const FIELDCRAFT_XP_LEVELS = [0, 0, 60, 180, 420, 900]; // index = level
+const FIELDCRAFT_MANEUVERS = {
+  read:  { level:2, name:'Read',  blurb:'Peek the enemy\'s intent one step further ahead.' },
+  press: { level:3, name:'Press', blurb:'Your attacks deal bonus damage against a Braced enemy.' },
+};
+
+// Reputation thresholds — at high rep, low-tier threats decline to initiate.
+const REP_NO_INITIATE = { 1: 55, 2: 80 }; // tier → reputation above which they won't start
+
+// Fold the M2 consumables into the main recipe table so crafting, the lab,
+// and inventory pick them up with no special-casing.
+Object.assign(RECIPES, M2_RECIPES);
+// Consumable inventory keys the game tracks (drives inventory init & sell menu)
+const CONSUMABLE_KEYS = ['timePearl','enhancementPowder','rewind','blast','shield','healingSalve','healingBurst'];
+// Which consumables are usable inside combat, and how
+const COMBAT_CONSUMABLES = {
+  timePearl:         { use:'freeze' },
+  enhancementPowder: { use:'enhance' },   // speed or strength, chosen at use
+  blast:             { use:'blast' },
+  shield:            { use:'shield' },
+  healingBurst:      { use:'heal' },
+  rewind:            { use:'rewind' },
 };

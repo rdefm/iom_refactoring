@@ -10,6 +10,13 @@ function renderStatsScreen() {
   const weaponId = p.equipment.weapon;
   const weaponObj = weaponId ? p.items.find(i => i.id === weaponId) : null;
   const weaponDef = weaponObj ? ITEMS[weaponObj.type] : null;
+  const rep = p.reputation || 0;
+  const fcSkill = p.fieldcraftSkill || 1;
+  const fcNext = FIELDCRAFT_XP_LEVELS[fcSkill + 1] || null;
+  const fcPrev = FIELDCRAFT_XP_LEVELS[fcSkill] || 0;
+  const fcPct = fcNext ? Math.round(((p.fieldcraftXP || 0) - fcPrev) / (fcNext - fcPrev) * 100) : 100;
+  const fcBonus = Math.min(0.12, (fcSkill - 1) * 0.03);
+  const maneuvers = Object.values(FIELDCRAFT_MANEUVERS).filter(m => fcSkill >= m.level).map(m => m.name).join(', ');
 
   return `<div class="stats-screen screen-fade-enter">
     <div class="screen-header">
@@ -35,12 +42,13 @@ function renderStatsScreen() {
           <div class="stats-card">
             <div class="stats-card-label">Attack</div>
             <div class="stats-card-value">${atk.min}–${atk.max}</div>
-            <div class="stats-card-sub">${weaponDef ? `w/ ${weaponDef.name}` : 'unarmed'}</div>
+            <div class="stats-card-sub">${weaponDef ? `w/ ${weaponDef.name}` : 'unarmed'}${fcBonus > 0 ? ` · +${Math.round(fcBonus*100)}% fieldcraft` : ''}</div>
           </div>
           <div class="stats-card">
-            <div class="stats-card-label">Weapon</div>
-            <div class="stats-card-value" style="font-size:15px">${weaponDef ? weaponDef.symbol + ' ' + weaponDef.name : '—'}</div>
-            <div class="stats-card-sub">${weaponDef ? 'equipped' : 'nothing equipped'}</div>
+            <div class="stats-card-label">Reputation</div>
+            <div class="stats-card-value">${rep}<span style="font-family:var(--font-ui);font-size:13px;color:var(--muted)">/100</span></div>
+            <div class="stats-card-sub">${rep >= 55 ? 'chancers think twice' : rep >= 25 ? 'a name that travels' : 'a nobody, for now'}</div>
+            <div class="bar-wrap" style="margin-top:6px"><div class="bar-fill xp" style="width:${rep}%"></div></div>
           </div>
         </div>
       </div>
@@ -58,6 +66,17 @@ function renderStatsScreen() {
             <div class="stats-card-value">${p.cultivatingSkill}<span style="font-family:var(--font-ui);font-size:13px;color:var(--muted)">/5</span></div>
             <div class="stats-card-sub">${CULTIVATING_XP_LEVELS[p.cultivatingSkill+1] ? p.cultivatingXP+'/'+CULTIVATING_XP_LEVELS[p.cultivatingSkill+1]+' XP' : 'Max'}</div>
             <div class="bar-wrap" style="margin-top:6px"><div class="bar-fill xp" style="width:${Math.round((p.cultivatingXP-(CULTIVATING_XP_LEVELS[p.cultivatingSkill]||0))/((CULTIVATING_XP_LEVELS[p.cultivatingSkill+1]||p.cultivatingXP+1)-(CULTIVATING_XP_LEVELS[p.cultivatingSkill]||0))*100)}%"></div></div>
+          </div>
+          <div class="stats-card">
+            <div class="stats-card-label">Fieldcraft</div>
+            <div class="stats-card-value">${fcSkill}<span style="font-family:var(--font-ui);font-size:13px;color:var(--muted)">/5</span></div>
+            <div class="stats-card-sub">${fcNext ? p.fieldcraftXP+'/'+fcNext+' XP' : 'Max'}</div>
+            <div class="bar-wrap" style="margin-top:6px"><div class="bar-fill xp" style="width:${fcPct}%"></div></div>
+          </div>
+          <div class="stats-card">
+            <div class="stats-card-label">Maneuvers</div>
+            <div class="stats-card-value" style="font-size:14px">${maneuvers || '—'}</div>
+            <div class="stats-card-sub">${maneuvers ? 'combat unlocks' : 'raise Fieldcraft to unlock'}</div>
           </div>
         </div>
       </div>

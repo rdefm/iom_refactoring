@@ -64,6 +64,35 @@ The vision doc's M1 layer, on top of prototype parity:
 - **Cultivating tutorial**: Archie walks you through his transferred vein
   after the home-raid beat.
 
+## M2 — "Everything Wants Your Ore" (v0.7)
+
+Combat 2.0 and the systems that feed it:
+
+- **Negotiation openers**: every hostile encounter starts at a standoff —
+  **Talk** (vs reputation + faction backup), **Bribe** (cost scales with
+  enemy greed × what you're visibly carrying), **Intimidate** (attack +
+  weapon + reputation vs nerve), or **Fight**. A fight can be fully avoided.
+- **Intent-telegraph combat**: each enemy shows its next move — Swing,
+  Heavy, Grab, Brace, Call, Bolt — and your turn is about answering it.
+  Built enemy-count-agnostic (`combat.enemies[]`); **Call** spawns a second
+  combatant, **Grab** steals ore/cash that a **Bolt** carries off, **Brace**
+  halves your hits unless you **Blast** through it.
+- **Consumable answers**: Blast (ignores Brace), Shield (absorbs Heavy/Grab),
+  Time Pearl (freezes Heavy), Enhancement Powder (Speed beats Grab / Strength
+  big hit), Healing Burst (time+life combo, first two-type recipe), Healing
+  Salve (overnight regen). Every intent has at least one answer.
+- **Reputation (0–100)**: earned by wins and intimidation, decays slowly,
+  feeds the openers. **Fieldcraft** skill: XP from fights/negotiations/
+  escapes, capped ±15% bonuses, unlocks Read and Press maneuvers.
+- **Enemy roster**: 8 templates across threat tiers T1–T3 with intent mixes,
+  greed/nerve/affinity profiles; tiers scale with district danger and visible
+  value, never player level.
+- **NPC vein raids**: a daily roll per vein vs its security tier steals
+  charged ore — the demand side of vein-security spending. Home raids run on
+  the new intent combat.
+- **Rewind** rebuilt for the array model (full-state snapshots); save
+  migration adds the M2 fields and clears any old-format mid-fight combat.
+
 Conventions to preserve (they're what the vision doc's engine foundations rely
 on): screens never mutate state directly; `gameState` stays a pure data tree
 (no node refs, no closures) so combat snapshots/Rewind keep working; buttons

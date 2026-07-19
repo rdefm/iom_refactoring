@@ -24,13 +24,16 @@ const gameState = {
     attackMin:  5,
     attackMax:  12,
     currentDistrict: 'shoreditch',
+    reputation:  0,
     orichalchum: {},
     veins:       [],
-    inventory:      { timePearl: 0, enhancementPowder: 0, rewind: 0 },
+    inventory:      { timePearl: 0, enhancementPowder: 0, rewind: 0, blast: 0, shield: 0, healingSalve: 0, healingBurst: 0 },
     craftingSkill:    1,
     craftingXP:       0,
     cultivatingSkill: 1,
     cultivatingXP:    0,
+    fieldcraftSkill:  1,
+    fieldcraftXP:     0,
     equipment:   { weapon: null, device: null },   // null | item id string
     items:       [],                 // array of owned item objects
     craftingSkill:    1,
@@ -71,20 +74,22 @@ const gameState = {
   notifications: [],
   inventoryTab:  'ore',
   statsOpen:      false,
+  // Combat 2.0 — enemy-count-agnostic. `enemies` is an array (content 1v1);
+  // each carries its own telegraphed intent + statuses. Player combat statuses
+  // live on `player`. Pure data tree — snapshots deep-copy this whole object.
   combat: {
-    active:       false,
-    context:      'raid',  // 'raid' | 'mugging'
-    veinId:       null,
-    enemy:        null,
-    log:          [],
-    outcome:      null,
-    frozenTurns:  0,
-    motionTurns:  0,   // turns of motion powder active
-    motionPower:  0,   // attacks per turn while active
-    onWin:        null,  // function name string to call on win
-    snapshots:    [],   // combat state snapshots for rewind
-    evadeTurns:   0,    // turns of evade buff remaining
-    evadeChance:  0,    // miss chance per evade turn (0-1)
+    active:    false,
+    context:   'raid',      // 'raid' | 'mugging' | 'home_raid' | 'vein_raid'
+    phase:     'opener',    // 'opener' | 'fight' | 'over'
+    veinId:    null,
+    enemies:   [],          // [combatant]
+    log:       [],
+    outcome:   null,        // win | loss | fled | talked | bribed | intimidated
+    onWin:     null,
+    turn:      0,
+    player:    { shield:0, evadeTurns:0, evadeChance:0, motionTurns:0, motionPower:0, strengthNext:0 },
+    snapshots: [],
+    reinforceFrom: null,    // template id queued by a Call intent
   },
   contacts: {
     archie: { relation: 10, unlocked: true,  recruited: false, recruitThreshold: 80,  craftingSkill:1, craftingXP:0, cultivatingSkill:1, cultivatingXP:0, assignedRoom:null },

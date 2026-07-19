@@ -47,11 +47,11 @@ function renderSellMenuModal() {
   const pearlHave   = p.inventory.timePearl;
   const pearlQty    = ss['con_timePearl'] || 0;
   const pearlPrice  = CONSUMABLE_PRICES.timePearl;
-  const motionHave  = p.inventory.motionPowder;
-  const motionQty   = ss['con_motionPowder'] || 0;
-  const motionPrice = CONSUMABLE_PRICES.motionPowder;
+  const motionHave  = p.inventory.enhancementPowder;
+  const motionQty   = ss['con_enhancementPowder'] || 0;
+  const motionPrice = CONSUMABLE_PRICES.enhancementPowder;
   if (pearlQty  > 0) { gross += pearlPrice  * pearlQty;  lineItems.push({kind:'consumable',type:'timePearl',   qty:pearlQty}); }
-  if (motionQty > 0) { gross += motionPrice * motionQty; lineItems.push({kind:'consumable',type:'motionPowder',qty:motionQty}); }
+  if (motionQty > 0) { gross += motionPrice * motionQty; lineItems.push({kind:'consumable',type:'enhancementPowder',qty:motionQty}); }
 
   function conRow(symbol, label, price, have, ssKey) {
     if (!have) return '';
@@ -72,7 +72,7 @@ function renderSellMenuModal() {
   const conRows = canSellCons
     ? (pearlHave > 0 || motionHave > 0
       ? conRow('⧖','Time Pearl',   pearlPrice,  pearlHave,  'con_timePearl') +
-        conRow('↯','Motion Powder',motionPrice, motionHave, 'con_motionPowder')
+        conRow('↯','Enhancement Powder',motionPrice, motionHave, 'con_enhancementPowder')
       : '<div style="font-family:var(--font-ui);font-size:12px;color:var(--muted);padding:8px 0">No consumables in stock.</div>')
     : '';
 

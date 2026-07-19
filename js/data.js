@@ -5,16 +5,16 @@
 const TIME_BLOCKS = ['Morning', 'Afternoon', 'Evening'];
 
 const ORE_TYPES = {
-  time:   { name: 'Time Orichalchum',   symbol: '⧖', colour: '#7b68ee', flavorText: 'Smells faintly of burnt clocks.',        basePrice: 60 },
-  energy: { name: 'Energy Orichalchum', symbol: '⚡', colour: '#c8873a', flavorText: 'Makes your fillings ache slightly.',      basePrice: 50 },
-  life:   { name: 'Life Orichalchum',   symbol: '✦', colour: '#3a7a52', flavorText: 'Warm to the touch. Not unpleasantly.',   basePrice: 70 },
-  void:   { name: 'Void Orichalchum',   symbol: '◉', colour: '#6a3a6a', flavorText: 'Looking at it too long is ill-advised.',  basePrice: 90 },
-  motion: { name: 'Motion Orichalchum', symbol: '↯', colour: '#2a8fc4', flavorText: 'Vibrates faintly in your pocket.',        basePrice: 55 },
+  time:    { name: 'Time Orichalchum',    symbol: '⧖', colour: '#7b68ee', flavorText: 'Smells faintly of burnt clocks.',                     basePrice: 60 },
+  physics: { name: 'Physics Orichalchum', symbol: '⚛', colour: '#2a8fc4', flavorText: 'Heavier than it has any right to be. Blunt-instrument ore.', basePrice: 55 },
+  life:    { name: 'Life Orichalchum',    symbol: '✦', colour: '#3a7a52', flavorText: 'Warm to the touch. Not unpleasantly.',                basePrice: 70 },
+  fate:    { name: 'Fate Orichalchum',    symbol: '⚄', colour: '#c9a227', flavorText: 'Statistically inadvisable. The City calls it alpha.', basePrice: 85 },
+  emotion: { name: 'Emotion Orichalchum', symbol: '♥', colour: '#9b4a6a', flavorText: 'The one everyone pretends not to buy.',               basePrice: 65 },
 };
 // Base price per consumable (per unit, before Archie's 50/50 split)
 const CONSUMABLE_PRICES = {
-  timePearl:    120,
-  motionPowder: 150,
+  timePearl:         120,
+  enhancementPowder: 150,
 };
 const ORE_TYPE_KEYS = Object.keys(ORE_TYPES);
 
@@ -23,8 +23,11 @@ const VEIN_LEVELS = {
   2: { label:'Minor',    yieldCautious:[2,4],   yieldFull:[6,10],   rechargeBlocks:3, devBarMax:16,  devBarHarvestCost:3 },
   3: { label:'Moderate', yieldCautious:[4,7],   yieldFull:[10,16],  rechargeBlocks:3, devBarMax:24,  devBarHarvestCost:4 },
   4: { label:'Rich',     yieldCautious:[7,12],  yieldFull:[16,24],  rechargeBlocks:2, devBarMax:36,  devBarHarvestCost:5 },
-  5: { label:'Lode',     yieldCautious:[12,20], yieldFull:[24,40],  rechargeBlocks:2, devBarMax:9999,devBarHarvestCost:6 },
+  5: { label:'Lode',     yieldCautious:[12,20], yieldFull:[24,40],  rechargeBlocks:2, devBarMax:48,  devBarHarvestCost:6 },
+  6: { label:'Deep Lode',yieldCautious:[18,30], yieldFull:[36,60],  rechargeBlocks:2, devBarMax:9999,devBarHarvestCost:7 },
 };
+// Levels above the standard cap are reachable only via site hospitability ('level' bonus)
+const VEIN_MAX_LEVEL_DEFAULT = 5;
 
 const SEED_ORE_COST = 40;
 const CULTIVATING_XP_LEVELS = [0, 0, 80, 220, 500, 1000];
@@ -59,11 +62,11 @@ const RECIPES = {
     effectPower: [0, 1, 1, 2, 2, 3], // frozen turns per skill level
     xpReward:    20,
   },
-  motionPowder: {
-    name:        'Motion Powder',
+  enhancementPowder: {
+    name:        'Enhancement Powder',
     symbol:      '↯',
-    description: 'Rub on skin before a fight. Temporarily accelerates your movement — you act faster than anyone can track.',
-    ingredients: [{ type: 'motion', baseQty: 6 }],
+    description: 'Rub on skin before a fight. The speed variant — temporarily accelerates your movement until you act faster than anyone can track.',
+    ingredients: [{ type: 'life', baseQty: 6 }],
     baseSuccess: 0.35,
     baseCalcCost:6,
     effectPower: [0, 1, 1, 2, 2, 3], // extra attacks per turn (1=attack twice, 2=attack twice for 2 turns, 3=attack 3x)
@@ -100,14 +103,14 @@ const DEVICE_TYPES = {
     unlockFlag:  'craftingUnlocked',
     effect:      'freeze',
   },
-  motionDevice: {
-    id:          'motionDevice',
-    name:        'Motion Device',
+  enhancementDevice: {
+    id:          'enhancementDevice',
+    name:        'Enhancement Device',
     symbol:      '↯',
-    calcType:    'motion',
-    recipeKey:   'motionPowder',
-    description: `A motion-type device. Accelerates the user briefly on demand. Recharges daily.`,
-    unlockFlag:  'motionPowderUnlocked',
+    calcType:    'life',
+    recipeKey:   'enhancementPowder',
+    description: `A life-type device. Accelerates the user briefly on demand. Recharges daily.`,
+    unlockFlag:  'enhancementPowderUnlocked',
     effect:      'motion',
   },
   rewindDevice: {
@@ -141,7 +144,7 @@ const ARCHIE_ORE_GOAL = 10;
 
 // ── HOME TIERS ───────────────────────────────────────────────
 const HOME_TIERS = {
-  bedsit:    { id:'bedsit',    name:'Bedsit',            tier:1, upgradeCost:0,      dailyCost:50,  raidBaseChance:0.08,  maxSecuritySlots:1, maxRooms:0,  description:`A single room in Whitechapel. The boiler makes a sound like someone clearing their throat. No storage to speak of.` },
+  bedsit:    { id:'bedsit',    name:'Bedsit',            tier:1, upgradeCost:0,      dailyCost:50,  raidBaseChance:0.08,  maxSecuritySlots:1, maxRooms:0,  description:`A single room on the Shoreditch side of the Whitechapel border. The boiler makes a sound like someone clearing their throat. No storage to speak of.` },
   flat:      { id:'flat',      name:'Flat',              tier:2, upgradeCost:1200,   dailyCost:80,  raidBaseChance:0.06,  maxSecuritySlots:2, maxRooms:1,  description:`Two rooms above a nail bar in Hackney. Neighbours ask no questions. One spare room.` },
   townhouse: { id:'townhouse', name:'Townhouse',         tier:3, upgradeCost:4000,   dailyCost:150, raidBaseChance:0.04,  maxSecuritySlots:3, maxRooms:3,  description:`Three floors, Bethnal Green. Previous tenant left in a hurry. Three spare rooms.` },
   safehouse: { id:'safehouse', name:'Safehouse',         tier:4, upgradeCost:12000,  dailyCost:300, raidBaseChance:0.02,  maxSecuritySlots:4, maxRooms:5,  description:`Off-grid property, no registered occupant. Not technically yours, but no one is arguing. Five spare rooms.` },
@@ -183,19 +186,19 @@ const BAROMETER_STATES = {
     stable:    { id:'stable',    label:'Stable',       description:'Markets function normally. Ore prices steady.', effects:{} },
     boom:      { id:'boom',      label:'Economic Boom', description:'Demand up. Buyers flush with cash.', effects:{ orePrice:+0.25, mugChance:-0.05 } },
     recession: { id:'recession', label:'Recession',     description:'Buyers tighter. Prices softer.', effects:{ orePrice:-0.20, mugChance:+0.05 } },
-    crisis:    { id:'crisis',    label:'Financial Crisis', description:'Market collapse. Some ore types in desperate demand.', effects:{ orePrice:-0.35, mugChance:+0.12, voidPremium:+0.5 } },
+    crisis:    { id:'crisis',    label:'Financial Crisis', description:'Market collapse. Some ore types in desperate demand.', effects:{ orePrice:-0.35, mugChance:+0.12, fatePremium:+0.5 } },
     inflation: { id:'inflation', label:'High Inflation', description:'Everything costs more. Daily costs up.', effects:{ dailyCost:+0.30, orePrice:+0.10 } },
   },
   social: {
     stable:   { id:'stable',   label:'Stable',        description:'Normal levels of street activity.',  effects:{} },
     unrest:   { id:'unrest',   label:'Social Unrest',  description:'Police busy elsewhere. Raid risks up, but so is opportunity.', effects:{ mugChance:+0.08, raidChance:+0.10 } },
     lockdown: { id:'lockdown', label:'Lockdown',       description:'Movement restricted. Searching harder, yields lower.', effects:{ searchFind:-0.15, dailyCost:+0.10 } },
-    festival: { id:'festival', label:'City Festival',  description:'Energy high, people out. Motion ore in demand.', effects:{ motionPremium:+0.40, searchFind:+0.05 } },
+    festival: { id:'festival', label:'City Festival',  description:'Crowds out, mood up. Emotion ore in demand.', effects:{ emotionPremium:+0.40, searchFind:+0.05 } },
     crime:    { id:'crime',    label:'Crime Wave',     description:'Everyone is at it. Mugging risk elevated.', effects:{ mugChance:+0.15, homeRaid:+0.05 } },
   },
   political: {
     stable:     { id:'stable',    label:'Stable',          description:'No significant political pressure.', effects:{} },
-    war:        { id:'war',       label:'Conflict Abroad',  description:'Military demand. Time and energy ore prices surge.', effects:{ timePremium:+0.6, energyPremium:+0.4, mugChance:+0.05 } },
+    war:        { id:'war',       label:'Conflict Abroad',  description:'Military demand. Time and physics ore prices surge.', effects:{ timePremium:+0.6, physicsPremium:+0.4, mugChance:+0.05 } },
     austerity:  { id:'austerity', label:'Austerity',        description:'Public services cut. Daily costs down but so is stability.', effects:{ dailyCost:-0.15, mugChance:+0.06 } },
     regulation: { id:'regulation',label:'Ore Regulation',   description:'Government crackdown. All trading riskier, prices up.', effects:{ mugChance:+0.10, orePrice:+0.15 } },
     election:   { id:'election',  label:'Election Period',   description:'Noise and distraction. Barometer effects muted temporarily.', effects:{ effectMod:-0.3 } },
@@ -204,10 +207,10 @@ const BAROMETER_STATES = {
 
 // Barometer action costs (to influence a section)
 const BAROMETER_ACTIONS = [
-  { id:'lobbyConclave',  label:'Lobby the Conclave',  section:'political', cost:{ cash:5000, void:20 },  requireFaction:'conclave', description:`Lean on Conclave contacts to shift the political climate.` },
-  { id:'floodMarket',    label:'Flood the market',    section:'economic',  cost:{ cash:2000, ore:50 },   requireFaction:null,       description:`Dump ore on the market to destabilise prices. Crude but effective.` },
-  { id:'spreadRumours',  label:'Spread rumours',      section:'social',    cost:{ cash:500 },            requireFaction:'network',  description:`The Network's speciality. Shape public perception.` },
-  { id:'engineerCrisis', label:'Engineer a crisis',   section:'economic',  cost:{ cash:10000, void:40 }, requireFaction:'conclave', description:`Requires serious resources. Serious consequences.` },
+  { id:'lobbyConclave',  label:'Lobby the Conclave',  section:'political', cost:{ cash:5000, emotion:20 },  requireFaction:'conclave', description:`Lean on Conclave contacts to shift the political climate.` },
+  { id:'floodMarket',    label:'Flood the market',    section:'economic',  cost:{ cash:2000, ore:50 },      requireFaction:null,       description:`Dump ore on the market to destabilise prices. Crude but effective.` },
+  { id:'spreadRumours',  label:'Spread rumours',      section:'social',    cost:{ cash:500, emotion:5 },    requireFaction:'network',  description:`The Network's speciality. Shape public perception. Runs on emotion ore, which nobody finds funny.` },
+  { id:'engineerCrisis', label:'Engineer a crisis',   section:'economic',  cost:{ cash:10000, emotion:40 }, requireFaction:'conclave', description:`Requires serious resources. Serious consequences.` },
 ];
 
 // Faction barometer preferences — persistent background nudges each day
@@ -267,7 +270,7 @@ const JAMES_CARDS = [
   { type:'speaker',   speaker:'Archie', text:'"He\'s the best craftsman I know. Turns raw calc into — well, you\'ve seen what the pearls do."' },
   { type:'speaker',   speaker:'James',  text:'"Don\'t flatter me. I\'m the only craftsman you know. There\'s a difference." He turns to Archie. "I have an order I need moved. I\'ll give you the next batch of pearls at cost — usual rate — if you pick up a supply run for me. Stratford. Tonight."' },
   { type:'speaker',   speaker:'Archie', text:'"Yeah, alright. What am I picking up?"' },
-  { type:'speaker',   speaker:'James',  text:'"Motion calc, forty units. The address will be on your phone by the time you\'re outside." He sets down the jar he\'s holding. "Your associate stays here."' },
+  { type:'speaker',   speaker:'James',  text:'"Life calc, forty units. The address will be on your phone by the time you\'re outside." He sets down the jar he\'s holding. "Your associate stays here."' },
   { type:'speaker',   speaker:'Archie', text:'"Right." He\'s already moving toward the door. "Cheers, James. Back in a bit."' },
   { type:'narration', label:null, text:'The shutter closes. James stands in the silence for a moment, regarding you with the careful expression of a man who has decided to do something he hasn\'t fully justified to himself yet.' },
   { type:'speaker',   speaker:'James',  text:'"I have a substantial order for time pearls. My usual assistant is indisposed. You\'ll do." A pause. "I realise that isn\'t flattering. It isn\'t meant to be."' },
@@ -357,8 +360,8 @@ const JAMES_MOTION_CARDS = [
   { type:'speaker',   speaker:'You',    text:`"If that's how you want to frame it."` },
   { type:'speaker',   speaker:'James',  text:`"I want to frame it accurately. You would not be a partner, a student, or a colleague. You would handle simple orders. I would retain all complex work. You would not advertise yourself as my associate."` },
   { type:'speaker',   speaker:'You',    text:`"That's fine."` },
-  { type:'speaker',   speaker:'James',  text:`"Hm." Another pause. "Motion powder. It's straightforward. Motion orichalchum, compressed differently to the pearls — outward rather than inward. Rub a small amount on the skin before physical exertion. Temporarily accelerates the user's movement."` },
-  { type:'craft',     label:'New recipe: Motion Powder', text:`The compression is different from pearls — you're pushing the calc outward through a membrane rather than sealing it. The result is a fine iridescent dust. James demonstrates once. He expects you to manage after that.` },
+  { type:'speaker',   speaker:'James',  text:`"Hm." Another pause. "Enhancement powder. The speed variant. Life orichalchum, compressed differently to the pearls — outward rather than inward. Rub a small amount on the skin before physical exertion. Temporarily accelerates the user's movement."` },
+  { type:'craft',     label:'New recipe: Enhancement Powder', text:`The compression is different from pearls — you're pushing the calc outward through a membrane rather than sealing it. The result is a fine iridescent dust. James demonstrates once. He expects you to manage after that.` },
   { type:'speaker',   speaker:'James',  text:`"Quality scales with skill, as always. Low-grade powder gives you one extra action in a fight. Better work gives you more. I trust you understand the principle."` },
   { type:'speaker',   speaker:'James',  text:`"I'll send you work when I have overflow. Don't expect it to be glamorous. And don't be late."` },
   { type:'resolution',label:null, text:`You leave with the recipe and the firm sense that James considers this arrangement a concession rather than a collaboration. You suspect that won't change.` },
@@ -419,3 +422,123 @@ const ARCHIE_SMS_2 = [ // contact to find a buyer
   { from:'archie', text:'Actually — you free tonight? Got someone lined up already. Shoreditch. Easy job.' },
 ];
 
+
+// ============================================================
+// M1 — LONDON: DISTRICTS, SITES, DISTRICT EVENTS
+// ============================================================
+
+const HOME_DISTRICT = 'shoreditch';
+
+// oreBias: null = balanced; string or array = weighted toward those types.
+// siteQualityMod shifts prospecting tier rolls; dangerMod feeds mugging/travel
+// events; priceMod is reserved for the M4 marketplace; rechargeBonus adds
+// +1 charge block per daily tick to veins in that district.
+const DISTRICTS = {
+  shoreditch:  { id:'shoreditch',  name:'Shoreditch',   oreBias:null,               siteQualityMod: 0.00, dangerMod:0.00, priceMod:0.00, siteCap:3, canProspect:true,
+    character:`Home base. Archie's turf. The Wetherspoons does not know what walks past it.`,
+    streets:['Brick Lane','Redchurch St','Curtain Rd','Rivington St','Boundary St'], factionPresence:['collective'] },
+  city:        { id:'city',        name:'The City',     oreBias:'fate',             siteQualityMod: 0.05, dangerMod:0.05, priceMod:0.15, siteCap:2, canProspect:true,
+    character:`Institutionalised gambling with better tailoring. Best prices, worst people.`,
+    streets:['Leadenhall Mkt','Cornhill','Lombard St','Threadneedle St','Walbrook'], factionPresence:['conclave'] },
+  greenwich:   { id:'greenwich',   name:'Greenwich',    oreBias:'time',             siteQualityMod: 0.05, dangerMod:0.00, priceMod:0.00, siteCap:3, canProspect:true,
+    character:`The meridian runs through it. Nobody at the Observatory has noticed.`,
+    streets:['King William Walk','Crooms Hill','Maze Hill','Royal Hill','Straightsmouth'], factionPresence:['guild'] },
+  camden:      { id:'camden',      name:'Camden',       oreBias:'physics',          siteQualityMod:-0.05, dangerMod:0.10, priceMod:-0.05, siteCap:4, canProspect:true,
+    character:`Loud, kinetic, and picking your pocket while you admire the noise. Cheap sites, if you can hold them.`,
+    streets:['Camden High St','Chalk Farm Rd','Hawley Cres','Inverness St','Hartland Rd'], factionPresence:['firm'] },
+  kingsx:      { id:'kingsx',      name:`King's Cross`, oreBias:['time','physics'], siteQualityMod: 0.00, dangerMod:0.05, priceMod:0.00, siteCap:3, canProspect:true, rechargeBonus:1,
+    character:`Transit hub. Everything moves through here, including things that shouldn't. Veins recharge fast district-wide.`,
+    streets:['York Way','Pentonville Rd','Caledonian Rd','Granary Sq','Wharfdale Rd'], factionPresence:['network'] },
+  battersea:   { id:'battersea',   name:'Battersea',    oreBias:'physics',          siteQualityMod: 0.05, dangerMod:0.00, priceMod:0.00, siteCap:3, canProspect:true,
+    character:`The power station hums at a frequency estate agents don't mention.`,
+    streets:['Battersea Park Rd','Lombard Rd','Falcon Rd','Queenstown Rd','Latchmere Rd'], factionPresence:['firm'] },
+  hampstead:   { id:'hampstead',   name:'Hampstead',    oreBias:'life',             siteQualityMod: 0.10, dangerMod:-0.05, priceMod:0.05, siteCap:2, canProspect:true,
+    character:`The Heath is basically a life-ore farm with dog walkers.`,
+    streets:['Flask Walk','Well Walk','Heath St','Willow Rd','Downshire Hill'], factionPresence:['guild'] },
+  whitechapel: { id:'whitechapel', name:'Whitechapel',  oreBias:'emotion',          siteQualityMod: 0.10, dangerMod:0.10, priceMod:0.00, siteCap:4, canProspect:true,
+    character:`Old grief soaked into the brick. Rich sites, and everyone knows it.`,
+    streets:['Whitechapel High St','Brick Lane (south)','Cable St','Commercial Rd','Fieldgate St'], factionPresence:['collective','network'] },
+  soho:        { id:'soho',        name:'Soho',         oreBias:null,               siteQualityMod: 0.00, dangerMod:0.05, priceMod:0.10, siteCap:0, canProspect:false,
+    character:`The marketplace district. Buyers, fronts, and premium prices. No veins — Soho consumes, it doesn't produce.`,
+    streets:['Berwick St','Dean St','Frith St','Brewer St','Wardour St'], factionPresence:['network','conclave'] },
+};
+const DISTRICT_KEYS = Object.keys(DISTRICTS);
+
+// Site hospitability tiers. seedMod adjusts seed success; bonusCount rolls
+// permanent vein bonuses from SITE_BONUSES; weight is the base prospecting roll.
+const SITE_TIERS = {
+  barren:    { id:'barren',    label:'Barren',    seedMod:null,  bonusCount:0, weight:15, blurb:`Nothing under it but Victorian rubble and a Pret.` },
+  poor:      { id:'poor',      label:'Poor',      seedMod:-0.15, bonusCount:0, weight:25, blurb:`Thin ground. It'd take, but grudgingly.` },
+  fair:      { id:'fair',      label:'Fair',      seedMod: 0.00, bonusCount:0, weight:35, blurb:`Workable. No complaints, no gifts.` },
+  rich:      { id:'rich',      label:'Rich',      seedMod: 0.20, bonusCount:1, weight:20, blurb:`The ground hums if you know how to listen.` },
+  saturated: { id:'saturated', label:'Saturated', seedMod: 0.35, bonusCount:3, weight:5,  blurb:`Whatever's down there has been waiting a long time.` },
+};
+
+const SITE_BONUSES = {
+  recharge: { id:'recharge', label:'−1 recharge block', blurb:'The vein refills faster here.' },
+  level:    { id:'level',    label:'+1 max level',      blurb:'Can grow past Lode to Deep Lode.' },
+  yield:    { id:'yield',    label:'+15% yield',        blurb:'Harvests run heavy.' },
+};
+
+// ── DISTRICT EVENT DECK ──────────────────────────────────────
+// Fires on travel/prospect. districts: null = anywhere; danger: only in
+// districts with dangerMod >= 0.05. effect kinds: cash, ore, relation, mugging, none.
+const DISTRICT_EVENTS = [
+  { id:'fox',        districts:null, weight:8, title:'The fox',
+    text:`A fox crosses the road in front of you, carrying what is unmistakably a chicken shop box. It gives you the look of a fellow professional. You respect it. It does not respect you.`,
+    effect:{ kind:'none' } },
+  { id:'busker',     districts:['camden','soho'], weight:8, title:'The busker',
+    text:`A busker is playing Wonderwall to an audience of nobody. You drop him a couple of quid, mostly as insurance against becoming him.`,
+    effect:{ kind:'cash', amount:-2 } },
+  { id:'dropped20',  districts:null, weight:5, title:'Twenty quid',
+    text:`A twenty-pound note, folded twice, sitting in a doorway like bait. You check the street both ways with the thoroughness of a man who has been the punchline before. Nothing. You take it.`,
+    effect:{ kind:'cash', amount:20 } },
+  { id:'oldledger',  districts:['city'], weight:6, title:'The plaque',
+    text:`A livery hall you've walked past a hundred times. Today you notice the founding date has been re-carved at least twice, each time older. The porter watches you notice it. He doesn't stop polishing the brass.`,
+    effect:{ kind:'none' } },
+  { id:'meridian',   districts:['greenwich'], weight:6, title:'The meridian line',
+    text:`Tourists photograph themselves straddling the meridian. For a half-second, every one of their phones shows the photo taken slightly before they take it. Nobody checks their camera roll that carefully. You do.`,
+    effect:{ kind:'ore', type:'time', amount:2 } },
+  { id:'heathdog',   districts:['hampstead'], weight:6, title:'Heath economy',
+    text:`A dog walker on the Heath is being towed by six dogs of wildly incompatible sizes, all of them frantic with more health than any animal should have. The grass here grows back overnight. You crouch and pocket a little of the soil.`,
+    effect:{ kind:'ore', type:'life', amount:2 } },
+  { id:'brickdust',  districts:['whitechapel'], weight:6, title:'Brick dust',
+    text:`Renovation skip outside a condemned terrace. The brick dust in the air tastes like a funeral you didn't attend. You bag some rubble before the builders come back. It's warm.`,
+    effect:{ kind:'ore', type:'emotion', amount:2 } },
+  { id:'powerhum',   districts:['battersea'], weight:6, title:'The hum',
+    text:`The power station's hum drops half a step, like a choir taking a breath. Every parked car alarm goes off at once, then stops at once. A shard of something dense has worked its way up between two paving slabs.`,
+    effect:{ kind:'ore', type:'physics', amount:2 } },
+  { id:'delayed',    districts:['kingsx'], weight:6, title:'Signal failure',
+    text:`The departures board flickers: every train delayed by exactly eleven minutes. A man in a lanyard walks briskly to a service door, unlocks it with a key that is much too old for the lock, and is gone. The board corrects itself.`,
+    effect:{ kind:'none' } },
+  { id:'archiespot', districts:['shoreditch'], weight:6, title:'Archie, in passing',
+    text:`Archie, outside the Wetherspoons, mid-argument with a man about a fridge. He clocks you, nods once — the nod that means "not now, but noted". You feel weirdly seen.`,
+    effect:{ kind:'relation', contact:'archie', amount:1 } },
+  { id:'toll',       districts:null, danger:true, weight:7, title:'The toll',
+    text:`Three lads on bikes circle once, quoting you a price for walking down what they describe as their road. It's not worth the argument. You pay the toll. The city has always had tolls; the collectors just got younger.`,
+    effect:{ kind:'cash', amount:-30 } },
+  { id:'followed',   districts:null, danger:true, weight:6, title:'Followed',
+    text:`Footsteps behind you keep pace for two streets. Then they stop keeping pace and start closing. You turn around, because the one thing you've learned in this trade is that it's always better to see it coming.`,
+    effect:{ kind:'mugging' } },
+  { id:'sinkhole',   districts:null, weight:4, title:'Roadworks',
+    text:`A hole in the road, cordoned off, three workmen staring into it with the specific stillness of men who have found something that isn't a pipe. One of them is on the phone. He isn't calling Thames Water — the hold music is Latin.`,
+    effect:{ kind:'none' } },
+  { id:'pigeontime', districts:null, weight:4, title:'The pigeon',
+    text:`A pigeon takes off, and for a full second it hangs in the air, frozen mid-flap, before the world remembers how physics works. Nobody else looks up. In this city, looking up marks you as a tourist.`,
+    effect:{ kind:'none' } },
+  { id:'sample',     districts:null, weight:5, title:'Market research',
+    text:`A man with a clipboard asks if you have thirty seconds for a survey about "local mineral awareness". His lanyard has no company name, and his pen is genuinely antique. You give deliberately wrong answers. He seems pleased with them.`,
+    effect:{ kind:'cash', amount:10 } },
+];
+
+// ── CULTIVATING TUTORIAL CARDS (fires after the home-raid debrief) ──
+const CULTIVATE_TUTORIAL_CARDS = [
+  { type:'narration', label:'Next morning — Whitechapel High St', text:`Archie's pin leads you to a railway arch, the kind with a car-wash sign and no car wash. He's already there, holding two teas, one of which is apparently yours.` },
+  { type:'speaker',   speaker:'Archie', text:`"Right. The vein. It's under the arch — has been since before the railway, which should bother people more than it does. Level one, barely alive. Your job is to bring it on."` },
+  { type:'speaker',   speaker:'Archie', text:`"Cultivating. You feed it attention, it feeds you calc. Spend a block of your day working it — clearing, coaxing, don't ask me the technical term, James would know. Fill its development bar and it levels up. Higher level, bigger yields."` },
+  { type:'speaker',   speaker:'Archie', text:`"When it's charged, you harvest. Two ways. Cautious: small take, vein doesn't mind. Full: big take, but it knocks the development back — do that too often and the vein packs it in entirely. Like most things in this city, it responds badly to being squeezed."` },
+  { type:'speaker',   speaker:'Archie', text:`"One more thing — geography. The vein's here, in Whitechapel. You're not always. Getting anywhere that isn't where you're standing costs you time, and you've only got the three blocks a day. Plan your rounds. The map's your friend."` },
+  { type:'speaker',   speaker:'You',    text:`"And when I've got calc?"` },
+  { type:'speaker',   speaker:'Archie', text:`"Bring it to me, same split as ever. Or make pearls out of it, which is better money and worse company. Either way — vein first. Go on. It won't cultivate itself. Believe me, I've waited."` },
+  { type:'resolution',label:null, text:`He leaves you with the tea and the arch and a faint sense of having been given both a gift and a job. Under your feet, something old is waiting to be worth something.` },
+];

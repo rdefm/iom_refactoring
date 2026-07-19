@@ -11,7 +11,7 @@ function renderCraftingScreen() {
   const recipesHTML = Object.entries(RECIPES).map(([key,r]) => {
     const cost=getCraftingCalcCost(key), chance=getCraftingSuccessChance(key), power=getCraftingEffectPower(key);
     const canMake=canCraft(key);
-    const stock = key==='timePearl' ? (p.inventory.timePearl||0) : key==='motionPowder' ? (p.inventory.motionPowder||0) : (p.inventory.rewind||0);
+    const stock = key==='timePearl' ? (p.inventory.timePearl||0) : key==='enhancementPowder' ? (p.inventory.enhancementPowder||0) : (p.inventory.rewind||0);
     const ingredientsHTML=r.ingredients.map(ing=>{
       const have=p.orichalchum[ing.type]||0, ok=have>=cost;
       return `<div class="recipe-ingredient"><span class="recipe-ingredient-name">${ORE_TYPES[ing.type].symbol} ${ORE_TYPES[ing.type].name}</span><span class="recipe-ingredient-qty ${ok?'ok':'missing'}">${have}/${cost}</span></div>`;
@@ -127,7 +127,7 @@ function renderCombatScreen() {
   const frozen=c.frozenTurns>0;
   const motion=c.motionTurns>0;
   const equippedDevice = p.equipment.device ? (p.devicesCompleted||[]).find(d=>d.id===p.equipment.device) : null;
-  const hasCombatItems = (p.inventory.timePearl||0)+(p.inventory.motionPowder||0) > 0 || (equippedDevice && getDeviceChargesLeft(equippedDevice) > 0);
+  const hasCombatItems = (p.inventory.timePearl||0)+(p.inventory.enhancementPowder||0) > 0 || (equippedDevice && getDeviceChargesLeft(equippedDevice) > 0);
   const logHTML=c.log.slice(-6).map(line=>{const cls=line.includes('You attack')||line.includes('pearl')?'player-hit':line.includes('hits you')?'enemy-hit':'info';return `<div class="combat-log-line ${cls}">${line}</div>`;}).join('');
   const fightBar=!c.outcome?`<div class="combat-actions"><button class="btn btn-danger" onclick="combatPlayerAttack()">⚔ Attack</button><button class="btn btn-secondary" onclick="combatFlee()">🏃 Run</button><button class="btn btn-secondary" onclick="combatUseItem()" ${!hasCombatItems?'disabled':''}>🎒 Item</button><button class="btn btn-secondary" style="opacity:0.4;cursor:default">✨ Ability</button></div>`:'';
   const mugWinLabel = '✅ They\u2019ve legged it';
@@ -145,23 +145,30 @@ function renderVeinDetailModal(data) {
   const ore  = ORE_TYPES[vein.oreType];
   const ld   = VEIN_LEVELS[vein.level];
   const sec  = SECURITY_TIERS.find(s => s.id === vein.security);
-  const exh  = isTimeExhausted();
+  const vd     = veinDistrict(vein);
+  const travel = travelBlocksTo(vd);
+  const need   = 1 + travel;
+  const exh    = blocksRemaining() < need;
+  const travelNote = travel ? ` · +${travel} travel` : '';
+  const maxLv  = getVeinMaxLevel(vein);
+  const hosp   = vein.hospitability || { tier:'fair', bonuses:[] };
+  const hospBonuses = (hosp.bonuses||[]).map(b => SITE_BONUSES[b]?.label).filter(Boolean).join(' · ');
   const secOpts = SECURITY_TIERS
     .filter(t => t.id !== vein.security && t.raidResist > (sec?.raidResist||0))
     .map(t => `<button class="btn btn-secondary" onclick="upgradeVeinSecurity('${vein.id}','${t.id}')" ${gameState.player.cash<t.cost?'disabled':''}>Upgrade security: ${t.label} — £${t.cost}</button>`)
     .join('');
-  const devPct    = vein.level >= 5 ? 100 : Math.min(100, Math.round(((vein.devBar||0) / ld.devBarMax) * 100));
-  const devAlmost = devPct >= 75 && vein.level < 5;
-  const chargePct = Math.round(((vein.chargeBlocks||0) / ld.rechargeBlocks) * 100);
+  const devPct    = vein.level >= maxLv ? 100 : Math.min(100, Math.round(((vein.devBar||0) / ld.devBarMax) * 100));
+  const devAlmost = devPct >= 75 && vein.level < maxLv;
+  const chargePct = Math.round(((vein.chargeBlocks||0) / getVeinRechargeBlocks(vein)) * 100);
   return `<div class="modal">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
       <span style="font-size:24px">${ore.symbol}</span>
       <div>
         <div class="modal-title">${ore.name}</div>
-        <div style="font-family:var(--font-ui);font-size:11px;color:var(--muted)">${vein.location}</div>
+        <div style="font-family:var(--font-ui);font-size:11px;color:var(--muted)">${DISTRICTS[vd].name} · ${vein.location}${travel?` · ${travel} block away`:' · you\'re here'}</div>
       </div>
     </div>
-    <div class="modal-sub">${ore.flavorText}</div>
+    <div class="modal-sub">${ore.flavorText}${hospBonuses ? `<br><span style="color:var(--amber)">Terroir (${SITE_TIERS[hosp.tier]?.label||'Fair'}): ${hospBonuses}</span>` : ''}</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
       <div class="vein-stat"><div class="vein-stat-label">Level</div><div class="vein-stat-value">${vein.level} — ${vein.levelLabel}</div></div>
       <div class="vein-stat"><div class="vein-stat-label">Recharge</div><div class="vein-stat-value">${vein.charged ? '✅ Ready' : `⏳ ${chargePct}%`}</div></div>
@@ -172,23 +179,23 @@ function renderVeinDetailModal(data) {
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
         <span class="section-label" style="margin-bottom:0">Development</span>
         <span style="font-family:var(--font-ui);font-size:12px;color:var(--muted)">
-          ${vein.level >= 5 ? 'Max level' : `${vein.devBar||0} / ${ld.devBarMax} pts`}
+          ${vein.level >= maxLv ? 'Max level' : `${vein.devBar||0} / ${ld.devBarMax} pts`}
         </span>
       </div>
       <div class="dev-bar-wrap" style="height:10px">
         <div class="dev-bar-fill ${devAlmost?'almost':''}" style="width:${devPct}%"></div>
       </div>
-      ${devAlmost && vein.level < 5 ? `<div style="font-family:var(--font-ui);font-size:11px;color:var(--amber);margin-top:4px">Almost ready to level up</div>` : ''}
+      ${devAlmost && vein.level < maxLv ? `<div style="font-family:var(--font-ui);font-size:11px;color:var(--amber);margin-top:4px">Almost ready to level up</div>` : ''}
     </div>
     <div class="modal-actions">
       <button class="btn btn-success" onclick="harvestVeinCautious('${vein.id}')" ${(!vein.charged||exh)?'disabled':''}>
-        ${!vein.charged ? '⛏ Not recharged yet' : exh ? '⛏ No time left' : `⛏ Cautious — ${ld.yieldCautious[0]}–${ld.yieldCautious[1]} u · no dev cost`}
+        ${!vein.charged ? '⛏ Not recharged yet' : exh ? '⛏ Not enough time today' : `⛏ Cautious — ${ld.yieldCautious[0]}–${ld.yieldCautious[1]} u · no dev cost${travelNote}`}
       </button>
       <button class="btn btn-amber" onclick="harvestVeinFull('${vein.id}')" ${(!vein.charged||exh)?'disabled':''}>
-        ${!vein.charged || exh ? '' : `⛏ Full — ${ld.yieldFull[0]}–${ld.yieldFull[1]} u · -${ld.devBarHarvestCost} dev`}
+        ${!vein.charged || exh ? '' : `⛏ Full — ${ld.yieldFull[0]}–${ld.yieldFull[1]} u · -${ld.devBarHarvestCost} dev${travelNote}`}
       </button>
       <button class="btn btn-secondary" onclick="attemptCultivate('${vein.id}')" ${exh?'disabled':''}>
-        🌱 Cultivate (${Math.round(getCultivatingSuccessChance()*100)}% · +${getCultivatingBarGain()} dev)
+        🌱 Cultivate (${Math.round(getCultivatingSuccessChance()*100)}% · +${getCultivatingBarGain()} dev${travelNote})
       </button>
       ${secOpts}
       <button class="btn btn-secondary" onclick="closeModal()">Close</button>
@@ -243,7 +250,7 @@ function renderConfirmNewGameModal() {
 function renderCombatItemsModal() {
   const p = gameState.player;
   const hasPearl  = (p.inventory.timePearl||0) > 0;
-  const hasMotion = (p.inventory.motionPowder||0) > 0;
+  const hasMotion = (p.inventory.enhancementPowder||0) > 0;
   const hasRewind = (p.inventory.rewind||0) > 0;
   const deviceId  = p.equipment.device;
   const device    = deviceId ? (p.devicesCompleted||[]).find(d => d.id === deviceId) : null;
@@ -257,7 +264,7 @@ function renderCombatItemsModal() {
     <div class="modal-sub">Pick what to use this turn.</div>
     <div class="modal-actions">
       ${hasPearl  ? `<button class="btn btn-primary" onclick="closeModal();combatUseTimePearl()">⧖ Time Pearl (${p.inventory.timePearl}) — freeze enemy</button>` : ''}
-      ${hasMotion ? `<button class="btn btn-primary" onclick="closeModal();combatUseMotionPowder()">↯ Motion Powder (${p.inventory.motionPowder}) — extra attacks</button>` : ''}
+      ${hasMotion ? `<button class="btn btn-primary" onclick="closeModal();combatUseMotionPowder()">↯ Enhancement Powder (${p.inventory.enhancementPowder}) — extra attacks</button>` : ''}
       ${hasRewind && snapCount > 0 ? `<button class="btn btn-primary" onclick="combatRewind()">⟲ Rewind (${p.inventory.rewind}) — ${rewindLabel}</button>` : ''}
       ${hasRewind && snapCount === 0 ? `<button class="btn btn-secondary" disabled>⟲ Rewind — nothing to undo yet</button>` : ''}
       ${device && deviceCharges > 0 ? `<button class="btn btn-primary" onclick="${dt?.effect === 'rewind' ? 'combatRewind()' : 'combatUseDevice()'}">${dt.symbol} ${dt.name} (${deviceCharges}/${device.chargesPerDay}) — ${dt.effect==='freeze'?'freeze enemy':dt.effect==='rewind'?rewindLabel:'extra attacks'}</button>` : ''}
@@ -304,63 +311,78 @@ function renderJamesJobShortModal(data) {
 }
 
 function renderSeedVeinPickModal() {
-  const p   = gameState.player;
-  const exh = isTimeExhausted();
-  const rows = ORE_TYPE_KEYS.map(k => {
-    const ore       = ORE_TYPES[k];
-    const have      = p.orichalchum[k] || 0;
-    const canAfford = have >= SEED_ORE_COST && !exh;
-    return `<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">
-      <span style="font-size:22px;width:28px;text-align:center">${ore.symbol}</span>
-      <div style="flex:1">
-        <div style="font-family:var(--font-ui);font-size:13px;font-weight:600;color:var(--ink)">${ore.name.replace(' Orichalchum','')}</div>
-        <div style="font-family:var(--font-ui);font-size:11px;color:${canAfford?'var(--success)':'var(--muted)'}">
-          ${have} / ${SEED_ORE_COST} units ${canAfford ? '✓' : '— not enough'}
-        </div>
-      </div>
-      <button class="btn btn-amber" style="width:auto;padding:8px 14px;font-size:13px"
-        onclick="closeModal();openModal('seed_vein',{oreType:'${k}'})"
-        ${canAfford ? '' : 'disabled'}>
-        Seed
-      </button>
-    </div>`;
-  }).join('');
+  const sites = gameState.world.sites || [];
+  const rows = sites.length === 0
+    ? `<div style="font-family:var(--font-ui);font-size:13px;color:var(--muted);padding:16px 0;line-height:1.5">
+        No discovered sites. Veins are seeded into <strong>sites</strong> now — open the London map and prospect a district to find one. Site quality is visible before you pay for anything, which is the point.
+      </div>`
+    : sites.map(s => {
+        const t = SITE_TIERS[s.tier];
+        const d = DISTRICTS[s.district];
+        const travel = travelBlocksTo(s.district);
+        const bonuses = (s.bonuses||[]).map(b => SITE_BONUSES[b].label).join(' · ');
+        const barren = s.tier === 'barren';
+        const btn = s.natural
+          ? `<button class="btn btn-success" style="width:auto;padding:8px 12px;font-size:12px" onclick="claimNaturalVein('${s.id}')">Claim vein</button>`
+          : barren
+          ? `<span class="pill pill-danger">Barren</span>`
+          : `<button class="btn btn-amber" style="width:auto;padding:8px 12px;font-size:12px" onclick="closeModal();openModal('seed_vein',{siteId:'${s.id}'})">Seed</button>`;
+        return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
+          <div style="flex:1">
+            <div style="font-family:var(--font-ui);font-size:13px;font-weight:600;color:var(--ink)">${d.name} · <span style="color:${barren?'var(--muted)':'var(--amber)'}">${t.label}</span>${s.natural?' · 💠 live vein':''}</div>
+            <div style="font-family:var(--font-ui);font-size:11px;color:var(--muted)">${s.location}${travel?` · +${travel} travel`:''}${bonuses?`<br><span style="color:var(--amber)">${bonuses}</span>`:''}</div>
+          </div>
+          ${btn}
+        </div>`;
+      }).join('');
   return `<div class="modal">
-    <div class="modal-title">Seed a new vein</div>
-    <div class="modal-sub">Choose an ore type. Costs ${SEED_ORE_COST} units of matching calc plus one time block.</div>
-    ${exh ? `<div style="font-family:var(--font-ui);font-size:13px;color:var(--danger);margin-bottom:12px">No time blocks remaining today.</div>` : ''}
+    <div class="modal-title">Your discovered sites</div>
+    <div class="modal-sub">Prospect districts on the map to discover sites. A site's hospitability becomes the vein's permanent terroir.</div>
     <div style="margin-bottom:16px">${rows}</div>
     <div class="modal-actions">
+      <button class="btn btn-primary" onclick="closeModal();navigate('map')">🗺 Open the map</button>
       <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
     </div>
   </div>`;
 }
 
 function renderSeedVeinModal(data) {
-  const ore  = ORE_TYPES[data.oreType];
-  const have = gameState.player.orichalchum[data.oreType] || 0;
-  const chance = Math.round(getCultivatingSuccessChance() * 100);
-  const gain   = getCultivatingBarGain();
-  const exh    = isTimeExhausted();
-  return `<div class="modal">
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
-      <span style="font-size:32px">${ore.symbol}</span>
-      <div>
-        <div class="modal-title">Seed a ${ore.name.replace(' Orichalchum','')} vein</div>
-        <div style="font-family:var(--font-ui);font-size:11px;color:var(--muted)">Level 1 · ${ore.flavorText}</div>
+  const site = (gameState.world.sites||[]).find(s => s.id === data.siteId);
+  if (!site) return '';
+  const t = SITE_TIERS[site.tier];
+  const d = DISTRICTS[site.district];
+  const p = gameState.player;
+  const travel = travelBlocksTo(site.district);
+  const need   = 1 + travel;
+  const noTime = blocksRemaining() < need;
+  const chance = Math.round(Math.min(0.95, getCultivatingSuccessChance() + t.seedMod) * 100);
+  const bonuses = (site.bonuses||[]).map(b => `${SITE_BONUSES[b].label} — ${SITE_BONUSES[b].blurb}`).join('<br>');
+  const rows = ORE_TYPE_KEYS.map(k => {
+    const ore  = ORE_TYPES[k];
+    const have = p.orichalchum[k] || 0;
+    const ok   = have >= SEED_ORE_COST && !noTime;
+    const biased = site.oreBias === k;
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+      <span style="font-size:20px;width:26px;text-align:center">${ore.symbol}</span>
+      <div style="flex:1">
+        <div style="font-family:var(--font-ui);font-size:13px;font-weight:600;color:var(--ink)">${ore.name.replace(' Orichalchum','')}${biased?' <span class="pill pill-amber" style="font-size:9px">local bias</span>':''}</div>
+        <div style="font-family:var(--font-ui);font-size:11px;color:${have>=SEED_ORE_COST?'var(--success)':'var(--muted)'}">${have} / ${SEED_ORE_COST} u</div>
       </div>
-    </div>
-    <div class="modal-sub">Compress ${SEED_ORE_COST} units of ${ore.name} into the ground and encourage a new vein to form. It doesn't always work.</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px">
-      <div class="vein-stat"><div class="vein-stat-label">Cost</div><div class="vein-stat-value">${SEED_ORE_COST} u</div></div>
-      <div class="vein-stat"><div class="vein-stat-label">You have</div><div class="vein-stat-value" style="color:var(--success)">${have} u</div></div>
+      <button class="btn btn-amber" style="width:auto;padding:8px 12px;font-size:12px" onclick="attemptSeedAtSite('${site.id}','${k}')" ${ok?'':'disabled'}>Seed</button>
+    </div>`;
+  }).join('');
+  return `<div class="modal">
+    <div class="modal-title">Seed at ${d.name}</div>
+    <div style="font-family:var(--font-ui);font-size:11px;color:var(--muted);margin-bottom:6px">${site.location}</div>
+    <div class="modal-sub"><strong style="color:var(--amber)">${t.label} site.</strong> ${t.blurb}${bonuses?`<br><span style="color:var(--amber)">${bonuses}</span>`:''}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
       <div class="vein-stat"><div class="vein-stat-label">Success chance</div><div class="vein-stat-value">${chance}%</div></div>
-      <div class="vein-stat"><div class="vein-stat-label">Initial dev</div><div class="vein-stat-value">+${gain} pts</div></div>
+      <div class="vein-stat"><div class="vein-stat-label">Time cost</div><div class="vein-stat-value">${need} block${need>1?'s':''}${travel?' (incl. travel)':''}</div></div>
     </div>
+    ${noTime ? `<div style="font-family:var(--font-ui);font-size:13px;color:var(--danger);margin-bottom:12px">Not enough time blocks left today.</div>` : ''}
+    <div style="margin-bottom:16px">${rows}</div>
     <div class="modal-actions">
-      <button class="btn btn-amber" onclick="attemptSeed('${data.oreType}')" ${exh?'disabled':''}>
-        ${exh ? 'No time left today' : `🌱 Seed (uses 1 time block)`}
-      </button>
+      <button class="btn btn-secondary" onclick="closeModal();openModal('seed_vein_pick',{})">‹ Back to sites</button>
       <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
     </div>
   </div>`;
@@ -491,7 +513,7 @@ function renderBarometerSectionModal(data) {
   const bcd = gameState.barometerCooldowns[section];
   const day = gameState.world.day;
   const active = gameState.barometer[section];
-  const fxLabels = { orePrice:'Ore prices', mugChance:'Mugging risk', dailyCost:'Daily costs', searchFind:'Search chance', homeRaid:'Home raid risk', voidPremium:'Void premium', timePremium:'Time premium', energyPremium:'Energy premium', motionPremium:'Motion premium', effectMod:'Effect modifier' };
+  const fxLabels = { orePrice:'Ore prices', mugChance:'Mugging risk', dailyCost:'Daily costs', searchFind:'Search chance', homeRaid:'Home raid risk', timePremium:'Time premium', physicsPremium:'Physics premium', lifePremium:'Life premium', fatePremium:'Fate premium', emotionPremium:'Emotion premium', effectMod:'Effect modifier' };
   const canAfford = gameState.player.cash >= 2000;
 
   const statesHTML = Object.entries(BAROMETER_STATES[section]).map(([sid, state]) => {
@@ -571,14 +593,14 @@ function renderLabOptions() {
   const thresholds = gameState.labThresholds || {};
   const unlocked = Object.entries(RECIPES).filter(([key]) =>
     (key === 'timePearl'    && gameState.flags.craftingUnlocked) ||
-    (key === 'motionPowder' && gameState.flags.motionPowderUnlocked)
+    (key === 'enhancementPowder' && gameState.flags.enhancementPowderUnlocked)
   );
   if (unlocked.length === 0) return `<div style="font-family:var(--font-ui);font-size:12px;color:var(--muted);margin-top:4px">No recipes unlocked yet.</div>`;
   return `<div style="margin-top:4px">
     <div class="section-label" style="margin-bottom:6px">Auto-craft Thresholds</div>
     <div style="font-family:var(--font-ui);font-size:11px;color:var(--muted);margin-bottom:10px">The lab crafts each item until you hold this many. Set to 0 to disable.</div>
     ${unlocked.map(([key,r]) => {
-      const inv = key === 'timePearl' ? (gameState.player.inventory.timePearl||0) : (gameState.player.inventory.motionPowder||0);
+      const inv = key === 'timePearl' ? (gameState.player.inventory.timePearl||0) : (gameState.player.inventory.enhancementPowder||0);
       const t   = thresholds[key] || 0;
       return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
         <div>
@@ -686,6 +708,9 @@ function renderModal() {
   if (type==='seed_result')       inner = renderSeedResultModal(data);
   if (type==='seed_vein_pick')    inner = renderSeedVeinPickModal();
   if (type==='cultivate_result')  inner = renderCultivateResultModal(data);
+  if (type==='district')          inner = renderDistrictModal(data);
+  if (type==='prospect_result')   inner = renderProspectResultModal(data);
+  if (type==='district_event')    inner = renderDistrictEventModal(data);
   return inner ? `<div class="modal-overlay" onclick="if(event.target===this)closeModal()">${inner}</div>` : '';
 }
 
@@ -694,7 +719,7 @@ function renderGlobalNav() {
   const s = gameState.currentScreen;
   const contactsBadge = ['sms_archie','meet_james','buyer_event','crafting_event','archie_craft_chat'].includes(stage) ? 'nav-btn-badge' : '';
   const craftEnabled  = gameState.flags.craftingUnlocked;
-  const worldScreens  = ['world','property','factions','barometer','stats','save'];
+  const worldScreens  = ['world','map','property','factions','barometer','stats','save'];
   const onHome      = s === 'home'                               ? 'active' : '';
   const onInventory = s === 'inventory'                          ? 'active' : '';
   const onCraft     = s === 'crafting'                           ? 'active' : '';

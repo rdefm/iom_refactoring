@@ -20,19 +20,25 @@ function startDebug() {
   p.inventory.timePearl = 5; p.inventory.rewind = 3; p.craftingSkill = 3; p.craftingXP = 100;
   p.items = [{ id:'crowbar_1', type:'crowbar' }];
   ORE_TYPE_KEYS.forEach(k => { p.orichalchum[k] = 20; });
-  [['time',3],['energy',1],['life',5]].forEach(([type,level]) => {
+  [['time',3,'greenwich'],['physics',1,'camden'],['life',5,'hampstead']].forEach(([type,level,district]) => {
     p.veins.push({ id:makeVeinId(), oreType:type, level, levelLabel:VEIN_LEVELS[level].label,
       charged:true, chargeBlocks:VEIN_LEVELS[level].rechargeBlocks, claimed:true, npcClaimed:false,
-      security:'basic', guards:0, guardTemplate:null, location:generateLocationName() });
+      security:'basic', guards:0, guardTemplate:null, location:generateLocationName(district),
+      district, hospitability:{tier:'fair',bonuses:[]}, maxLevel:VEIN_MAX_LEVEL_DEFAULT });
   });
+  p.currentDistrict = HOME_DISTRICT;
+  gameState.world.sites = [];
+  gameState.world._siteId = 1;
+  makeSite('whitechapel'); makeSite('city'); makeSite('kingsx');
+  gameState.flags.cultivateTutorialSeen = true;
   const f = gameState.flags;
   f.tutorialStage='free'; f.metArchie=f.hasDetector=f.hasHarvester=f.metJames=f.hasTimePearls=true;
   f.buyerEventSeen=f.craftingUnlocked=f.jamesCraftEventSeen=f.archieCraftChatSeen=f.canSellConsumables=true;
-  f.archieMotionEventSeen=f.jamesMotionEventSeen=f.motionPowderUnlocked=true; f.consSoldCount=5;
+  f.archieMotionEventSeen=f.jamesMotionEventSeen=f.enhancementPowderUnlocked=true; f.consSoldCount=5;
   f.archiePartnerSeen=f.homeUnlocked=f.securityContactUnlocked=true;
   // homeRaidEventSeen intentionally NOT set — set pending so event triggers on home screen
   gameState.flags.homeRaidEventPending = true;
-  gameState.player.inventory.motionPowder=3;
+  gameState.player.inventory.enhancementPowder=3;
   gameState.contacts.james.unlocked = true;
   gameState.contacts.archie.relation = 60;
   gameState.contacts.james.relation  = 40;
@@ -54,7 +60,7 @@ function startDebug() {
   gameState.home.tier = 'compound';
   gameState.home.security = ['lock','cameras'];
   gameState.home.rooms = ['workshop','homeGym','lab','veinStation'];
-  gameState.home.storedOre = { time:10, energy:5 };
+  gameState.home.storedOre = { time:10, physics:5 };
   // Debug faction relations
   gameState.factions.collective.relation = 25;
   gameState.factions.firm.relation = 15;
@@ -179,11 +185,7 @@ function getEffectiveMugChance(base) {
 
 function getEffectiveOrePrice(type, base) {
   const fx = getBarometerEffects();
-  let mult = 1 + (fx.orePrice||0);
-  if (type==='void'   && fx.voidPremium)    mult += fx.voidPremium;
-  if (type==='time'   && fx.timePremium)    mult += fx.timePremium;
-  if (type==='energy' && fx.energyPremium)  mult += fx.energyPremium;
-  if (type==='motion' && fx.motionPremium)  mult += fx.motionPremium;
+  let mult = 1 + (fx.orePrice||0) + (fx[type + 'Premium']||0);
   return Math.round(base * Math.max(0.1, mult));
 }
 
@@ -367,11 +369,26 @@ function dailyTick() {
   const expired = [];
   gameState.player.veins = gameState.player.veins.filter(v => {
     const ld = VEIN_LEVELS[v.level];
-    if (v.chargeBlocks < ld.rechargeBlocks) v.chargeBlocks++;
-    if (v.chargeBlocks >= ld.rechargeBlocks) v.charged = true;
+    const rechargeNeed = getVeinRechargeBlocks(v);
+    const districtBonus = DISTRICTS[veinDistrict(v)]?.rechargeBonus || 0;
+    if (v.chargeBlocks < rechargeNeed) v.chargeBlocks += 1 + districtBonus;
+    if (v.chargeBlocks >= rechargeNeed) { v.chargeBlocks = rechargeNeed; v.charged = true; }
     const age = day - (v.claimedOnDay || day);
     if (age >= ld.lifespanDays) { expired.push(v); return false; }
     return true;
+  });
+  // You always wake at home
+  gameState.player.currentDistrict = HOME_DISTRICT;
+  // NPC site-claiming: unclaimed sites can be snapped up — quality and age make them hotter
+  const claimed = [];
+  gameState.world.sites = (gameState.world.sites || []).filter(s => {
+    const age = day - (s.discoveredDay || day);
+    const tierHeat = { barren:0, poor:0.01, fair:0.03, rich:0.06, saturated:0.10 }[s.tier] || 0;
+    if (Math.random() < tierHeat + age * 0.01) { claimed.push(s); return false; }
+    return true;
+  });
+  claimed.forEach(s => {
+    pushNotification(`Someone got to the ${SITE_TIERS[s.tier].label.toLowerCase()} site in ${DISTRICTS[s.district].name} before you. It happens. It keeps happening.`);
   });
   // Day 2: trigger buyer event (Archie texts in the morning)
   if (gameState.flags.tutorialStage === 'buyer_event' && !gameState.flags.buyerEventSeen && day >= 2) {
@@ -402,10 +419,216 @@ function dismissNotification(id) {
 }
 
 // === LOCATION GENERATOR (used by seeding) ===
-function generateLocationName() {
-  const s = ['Brick Lane','Bethnal Green Rd','Commercial St','Whitechapel High St','Mile End Rd','Roman Rd','Hackney Rd','Cambridge Heath Rd','Vallance Rd'];
+function generateLocationName(districtId) {
+  const d = DISTRICTS[districtId];
+  const s = d ? d.streets : ['Brick Lane','Bethnal Green Rd','Commercial St','Whitechapel High St','Mile End Rd','Roman Rd','Hackney Rd','Cambridge Heath Rd','Vallance Rd'];
   const x = ['near the off-licence','behind the Tesco Metro','under the railway arch','in the car park','by the bus stop','beside the bookies'];
   return `${randFrom(s)}, ${randFrom(x)}`;
+}
+
+// === M1: TRAVEL SYSTEM ===
+// One rule: acting in a district you're not in costs +1 time block (the travel),
+// then the action costs its normal block. You wake at home each day.
+function blocksRemaining() { return TIME_BLOCKS.length - gameState.world.timeBlocksDone.length; }
+function isPlayerIn(districtId) { return (gameState.player.currentDistrict || HOME_DISTRICT) === districtId; }
+function travelBlocksTo(districtId) { return isPlayerIn(districtId) ? 0 : 1; }
+
+// Consume the travel block if needed before an action elsewhere.
+// Returns false (with a notification) when there isn't time for travel + action.
+function ensurePresence(districtId) {
+  if (isPlayerIn(districtId)) return true;
+  if (blocksRemaining() < 2) {
+    pushNotification(`Not enough time today to get to ${DISTRICTS[districtId].name} and still do anything there.`);
+    renderGame();
+    return false;
+  }
+  advanceTimeBlock();
+  gameState.player.currentDistrict = districtId;
+  return true;
+}
+
+// Explicit travel from the map — costs 1 block, can trigger a district event.
+function travelTo(districtId) {
+  if (isPlayerIn(districtId) || isTimeExhausted()) return;
+  advanceTimeBlock();
+  gameState.player.currentDistrict = districtId;
+  closeModal();
+  if (!maybeDistrictEvent(districtId)) renderGame();
+}
+
+// === M1: PROSPECTING & SITES ===
+function makeSiteId() {
+  gameState.world._siteId = (gameState.world._siteId || 1);
+  return 's' + (gameState.world._siteId++);
+}
+function districtSites(districtId) {
+  return (gameState.world.sites || []).filter(s => s.district === districtId);
+}
+function rollSiteTier(districtId) {
+  const d = DISTRICTS[districtId];
+  const skill = gameState.player.cultivatingSkill || 1;
+  const q = (d.siteQualityMod || 0) + (skill - 1) * 0.03; // cultivating's second job
+  const weights = {};
+  Object.values(SITE_TIERS).forEach(t => { weights[t.id] = t.weight; });
+  // Quality shifts weight out of barren/poor into rich/saturated
+  const shift = Math.round(q * 100);
+  weights.barren    = Math.max(2, weights.barren - shift);
+  weights.poor      = Math.max(5, weights.poor   - shift);
+  weights.rich      = Math.max(0, weights.rich      + Math.round(shift * 0.7));
+  weights.saturated = Math.max(0, weights.saturated + Math.round(shift * 0.3));
+  const total = Object.values(weights).reduce((s,v)=>s+v,0);
+  let roll = Math.random() * total;
+  for (const [id,w] of Object.entries(weights)) { roll -= w; if (roll <= 0) return id; }
+  return 'fair';
+}
+function rollSiteOreType(districtId) {
+  const bias = DISTRICTS[districtId].oreBias;
+  if (!bias) return randFrom(ORE_TYPE_KEYS);
+  const biased = Array.isArray(bias) ? bias : [bias];
+  // 60% chance the district's character wins; otherwise anything
+  return Math.random() < 0.6 ? randFrom(biased) : randFrom(ORE_TYPE_KEYS);
+}
+function tierRank(tierId) { return ['barren','poor','fair','rich','saturated'].indexOf(tierId); }
+function makeSite(districtId) {
+  const tier = rollSiteTier(districtId);
+  const t = SITE_TIERS[tier];
+  const bonusPool = Object.keys(SITE_BONUSES);
+  const bonuses = tier === 'saturated' ? [...bonusPool]
+    : t.bonusCount > 0 ? [randFrom(bonusPool)] : [];
+  const site = {
+    id: makeSiteId(), district: districtId, tier, bonuses,
+    oreBias: rollSiteOreType(districtId),
+    location: generateLocationName(districtId),
+    discoveredDay: gameState.world.day,
+    natural: tier === 'saturated' && Math.random() < 0.05,
+  };
+  gameState.world.sites.push(site);
+  return site;
+}
+function prospectDistrict(districtId) {
+  const d = DISTRICTS[districtId];
+  if (!d || !d.canProspect) return;
+  const need = 1 + travelBlocksTo(districtId);
+  if (blocksRemaining() < need) {
+    pushNotification(`Not enough time today. Prospecting ${d.name} needs ${need} block${need>1?'s':''}.`);
+    renderGame();
+    return;
+  }
+  if (!ensurePresence(districtId)) return;
+  advanceTimeBlock();
+  // District at cap: re-roll its worst unclaimed site instead
+  const existing = districtSites(districtId);
+  if (existing.length >= d.siteCap) {
+    const worst = existing.slice().sort((a,b)=>tierRank(a.tier)-tierRank(b.tier))[0];
+    gameState.world.sites = gameState.world.sites.filter(s => s.id !== worst.id);
+    const site = makeSite(districtId);
+    openModal('prospect_result', { siteId: site.id, rerolledTier: SITE_TIERS[worst.tier].label });
+  } else {
+    const site = makeSite(districtId);
+    openModal('prospect_result', { siteId: site.id });
+  }
+  awardCultivatingXP(10);
+  renderGame();
+}
+
+// === M1: SITE HOSPITABILITY → VEIN TERROIR ===
+function getVeinMaxLevel(vein) { return vein.maxLevel || VEIN_MAX_LEVEL_DEFAULT; }
+function veinHasBonus(vein, bonusId) { return !!(vein.hospitability && (vein.hospitability.bonuses||[]).includes(bonusId)); }
+function getVeinRechargeBlocks(vein) {
+  const base = VEIN_LEVELS[vein.level].rechargeBlocks;
+  return Math.max(1, base - (veinHasBonus(vein,'recharge') ? 1 : 0));
+}
+function getVeinYieldMult(vein) { return veinHasBonus(vein,'yield') ? 1.15 : 1; }
+function veinDistrict(vein) { return vein.district || 'whitechapel'; }
+
+function makeVeinFromSite(site, oreType, level) {
+  const ld = VEIN_LEVELS[level];
+  return {
+    id: makeVeinId(), oreType, level, levelLabel: ld.label,
+    devBar: 0, charged: false, chargeBlocks: 0,
+    claimed: true, npcClaimed: false,
+    security: 'none', guards: 0, guardTemplate: null,
+    location: site.location, district: site.district,
+    claimedOnDay: gameState.world.day,
+    hospitability: { tier: site.tier, bonuses: [...site.bonuses] },
+    maxLevel: VEIN_MAX_LEVEL_DEFAULT + ((site.bonuses||[]).includes('level') ? 1 : 0),
+  };
+}
+function attemptSeedAtSite(siteId, oreType) {
+  const site = (gameState.world.sites || []).find(s => s.id === siteId);
+  if (!site || site.tier === 'barren') return;
+  const have = gameState.player.orichalchum[oreType] || 0;
+  if (have < SEED_ORE_COST) return;
+  const need = 1 + travelBlocksTo(site.district);
+  if (blocksRemaining() < need) {
+    pushNotification(`Not enough time today. Seeding at ${DISTRICTS[site.district].name} needs ${need} block${need>1?'s':''}.`);
+    renderGame();
+    return;
+  }
+  if (!ensurePresence(site.district)) return;
+  advanceTimeBlock();
+  gameState.player.orichalchum[oreType] = have - SEED_ORE_COST;
+  const chance = Math.min(0.95, getCultivatingSuccessChance() + SITE_TIERS[site.tier].seedMod);
+  const success = Math.random() < chance;
+  if (success) {
+    const newVein = makeVeinFromSite(site, oreType, 1);
+    newVein.devBar = getCultivatingBarGain();
+    gameState.player.veins.push(newVein);
+    gameState.world.sites = gameState.world.sites.filter(s => s.id !== siteId);
+    awardCultivatingXP(30);
+    openModal('seed_result', { success: true, oreType, veinId: newVein.id });
+  } else {
+    awardCultivatingXP(5);
+    openModal('seed_result', { success: false, oreType, siteId });
+  }
+  renderGame();
+}
+function claimNaturalVein(siteId) {
+  // ~5% of Saturated sites hold a natural Lv1 vein — free, already alive
+  const site = (gameState.world.sites || []).find(s => s.id === siteId);
+  if (!site || !site.natural) return;
+  if (!ensurePresence(site.district)) return;
+  const vein = makeVeinFromSite(site, site.oreBias, 1);
+  vein.devBar = 2;
+  gameState.player.veins.push(vein);
+  gameState.world.sites = gameState.world.sites.filter(s => s.id !== siteId);
+  pushNotification(`The ${DISTRICTS[site.district].name} site held a live vein. It's yours now. No paperwork changed hands.`);
+  closeModal();
+  renderGame();
+}
+
+// === M1: DISTRICT EVENTS ===
+function maybeDistrictEvent(districtId, chance = 0.30) {
+  if (Math.random() > chance) return false;
+  const d = DISTRICTS[districtId];
+  const pool = DISTRICT_EVENTS.filter(ev => {
+    if (ev.districts && !ev.districts.includes(districtId)) return false;
+    if (ev.danger && (d.dangerMod || 0) < 0.05) return false;
+    return true;
+  });
+  if (!pool.length) return false;
+  const total = pool.reduce((s,ev)=>s+ev.weight,0);
+  let roll = Math.random() * total;
+  let event = pool[0];
+  for (const ev of pool) { roll -= ev.weight; if (roll <= 0) { event = ev; break; } }
+  if (event.effect.kind === 'mugging') {
+    gameState._pendingSaleCut = 0;
+    const enemy = { name:'A mugger', hp:28, hpMax:28, attackMin:4, attackMax:10, veinRef:null, isMugging:true };
+    gameState.combat = { active:true, context:'mugging', veinId:null, enemy,
+      log:[event.text.replace(/<[^>]*>/g,'')], outcome:null, frozenTurns:0, motionTurns:0, motionPower:0, onWin:null };
+    gameState.currentScreen = 'combat';
+    renderGame();
+    return true;
+  }
+  applyDistrictEventEffect(event);
+  openModal('district_event', { eventId: event.id });
+  return true;
+}
+function applyDistrictEventEffect(event) {
+  const e = event.effect;
+  if (e.kind === 'cash')     gameState.player.cash = Math.max(0, gameState.player.cash + e.amount);
+  if (e.kind === 'ore')      gameState.player.orichalchum[e.type] = (gameState.player.orichalchum[e.type]||0) + e.amount;
+  if (e.kind === 'relation') awardRelation(e.contact, e.amount);
 }
 
 // === CLAIM SYSTEM ===
@@ -451,36 +674,16 @@ function awardCultivatingXP(amount) {
   }
 }
 
-function attemptSeed(oreType) {
-  const have = gameState.player.orichalchum[oreType] || 0;
-  if (have < SEED_ORE_COST || isTimeExhausted()) return;
-  advanceTimeBlock();
-  gameState.player.orichalchum[oreType] = have - SEED_ORE_COST;
-  const success = Math.random() < getCultivatingSuccessChance();
-  if (success) {
-    const ld = VEIN_LEVELS[1];
-    const newVein = {
-      id: makeVeinId(), oreType, level: 1, levelLabel: ld.label,
-      devBar: getCultivatingBarGain(),
-      charged: false, chargeBlocks: 0,
-      claimed: true, npcClaimed: false,
-      security: 'none', guards: 0, guardTemplate: null,
-      location: generateLocationName(), claimedOnDay: gameState.world.day,
-    };
-    gameState.player.veins.push(newVein);
-    awardCultivatingXP(30);
-    openModal('seed_result', { success: true, oreType, veinId: newVein.id });
-  } else {
-    awardCultivatingXP(5);
-    openModal('seed_result', { success: false, oreType });
-  }
-  renderGame();
-}
-
 function attemptCultivate(veinId) {
-  if (isTimeExhausted()) return;
   const vein = gameState.player.veins.find(v => v.id === veinId);
   if (!vein) return;
+  const need = 1 + travelBlocksTo(veinDistrict(vein));
+  if (blocksRemaining() < need) {
+    pushNotification(`Not enough time today. That vein is in ${DISTRICTS[veinDistrict(vein)].name} — you'd need ${need} blocks.`);
+    renderGame();
+    return;
+  }
+  if (!ensurePresence(veinDistrict(vein))) return;
   advanceTimeBlock();
   const success = Math.random() < getCultivatingSuccessChance();
   if (success) {
@@ -489,7 +692,7 @@ function attemptCultivate(veinId) {
     const prevBar = vein.devBar || 0;
     vein.devBar   = prevBar + gain;
     awardCultivatingXP(20);
-    const levelledUp = vein.level < 5 && vein.devBar >= ld.devBarMax;
+    const levelledUp = vein.level < getVeinMaxLevel(vein) && vein.devBar >= ld.devBarMax;
     if (levelledUp) levelUpVein(vein);
     openModal('cultivate_result', {
       success: true, gain, veinId, levelledUp,
@@ -503,7 +706,7 @@ function attemptCultivate(veinId) {
 }
 
 function levelUpVein(vein) {
-  if (vein.level >= 5) return;
+  if (vein.level >= getVeinMaxLevel(vein)) return;
   vein.level++;
   vein.levelLabel = VEIN_LEVELS[vein.level].label;
   vein.devBar = 0;
@@ -524,13 +727,23 @@ function levelDownVein(vein) {
 
 // === HARVEST SYSTEM ===
 
+function canWorkVein(vein) {
+  const need = 1 + travelBlocksTo(veinDistrict(vein));
+  if (blocksRemaining() < need) {
+    pushNotification(`Not enough time today. That vein is in ${DISTRICTS[veinDistrict(vein)].name} — you'd need ${need} blocks.`);
+    renderGame();
+    return false;
+  }
+  return ensurePresence(veinDistrict(vein));
+}
+
 function harvestVeinCautious(veinId) {
-  if (isTimeExhausted()) return;
   const vein = gameState.player.veins.find(v => v.id === veinId);
   if (!vein || !vein.charged) return;
+  if (!canWorkVein(vein)) return;
   advanceTimeBlock();
   const ld = VEIN_LEVELS[vein.level];
-  const amount = rand(ld.yieldCautious[0], ld.yieldCautious[1]);
+  const amount = Math.round(rand(ld.yieldCautious[0], ld.yieldCautious[1]) * getVeinYieldMult(vein));
   gameState.player.orichalchum[vein.oreType] = (gameState.player.orichalchum[vein.oreType] || 0) + amount;
   vein.charged = false;
   vein.chargeBlocks = 0;
@@ -540,12 +753,12 @@ function harvestVeinCautious(veinId) {
 }
 
 function harvestVeinFull(veinId) {
-  if (isTimeExhausted()) return;
   const vein = gameState.player.veins.find(v => v.id === veinId);
   if (!vein || !vein.charged) return;
+  if (!canWorkVein(vein)) return;
   advanceTimeBlock();
   const ld = VEIN_LEVELS[vein.level];
-  const amount = rand(ld.yieldFull[0], ld.yieldFull[1]);
+  const amount = Math.round(rand(ld.yieldFull[0], ld.yieldFull[1]) * getVeinYieldMult(vein));
   gameState.player.orichalchum[vein.oreType] = (gameState.player.orichalchum[vein.oreType] || 0) + amount;
   vein.charged = false;
   vein.chargeBlocks = 0;
@@ -591,7 +804,7 @@ function attemptCraft(recipeKey) {
   if (success) {
     const power = getCraftingEffectPower(recipeKey);
     if (recipeKey === 'timePearl')    gameState.player.inventory.timePearl++;
-    if (recipeKey === 'motionPowder') gameState.player.inventory.motionPowder = (gameState.player.inventory.motionPowder||0) + 1;
+    if (recipeKey === 'enhancementPowder') gameState.player.inventory.enhancementPowder = (gameState.player.inventory.enhancementPowder||0) + 1;
     if (recipeKey === 'rewind')       gameState.player.inventory.rewind       = (gameState.player.inventory.rewind||0) + 1;
     awardCraftingXP(r.xpReward);
     openModal('craft_result', { recipeKey, success:true, power });
@@ -702,7 +915,7 @@ function combatUseDevice() {
     gameState.combat.frozenTurns += power;
     gameState.combat.log.push(`You activate the ${dt.name}. Enemy frozen for ${power} turn${power>1?'s':''}.`);
   } else if (dt.effect === 'motion') {
-    const power = RECIPES['motionPowder'].effectPower[p.craftingSkill] || 1;
+    const power = RECIPES['enhancementPowder'].effectPower[p.craftingSkill] || 1;
     gameState.combat.motionTurns += 2;
     gameState.combat.motionPower  = power;
     gameState.combat.log.push(`You activate the ${dt.name}. Movement accelerated.`);
@@ -880,14 +1093,39 @@ function completeHomeRaidDebrief() {
     guards:       0,
     guardTemplate:null,
     location:     'Whitechapel High St, under the railway arch',
+    district:     'whitechapel',
+    hospitability:{ tier:'fair', bonuses:[] },
+    maxLevel:     VEIN_MAX_LEVEL_DEFAULT,
     claimedOnDay: gameState.world.day,
   };
   gameState.player.veins.push(archieVein);
   pushNotification(`Archie's time vein added to your operations. Needs cultivating before first harvest.`);
   pushNotification(`Archie's security contact is available. Check your Property page.`);
-  gameState.currentScreen = 'home';
+  // Straight into the cultivating walkthrough — Archie shows you the vein
+  startCultivateTutorial();
+}
+
+// === M1: CULTIVATING TUTORIAL EVENT ===
+let cultivateTutorialStep = 0;
+function startCultivateTutorial() {
+  cultivateTutorialStep = 0;
+  gameState.currentScreen = 'event_cultivate_tutorial';
   renderGame();
 }
+function advanceCultivateTutorial() {
+  if (cultivateTutorialStep < CULTIVATE_TUTORIAL_CARDS.length) {
+    cultivateTutorialStep++;
+    renderGame();
+    setTimeout(() => { const a = document.querySelector('.event-card-area'); if(a) a.scrollTop = a.scrollHeight; }, 80);
+  }
+}
+function completeCultivateTutorial() {
+  gameState.flags.cultivateTutorialSeen = true;
+  pushNotification(`The vein's in Whitechapel. Working it from home costs a travel block — plan the day.`);
+  gameState.currentScreen = 'veins';
+  renderGame();
+}
+function rewindCultivateTutorial() { cultivateTutorialStep = 0; renderGame(); }
 
 // === CONTACT RELATION SYSTEM ===
 function awardRelation(contactId, amount) {
@@ -957,15 +1195,15 @@ function processLab() {
   let totalAttempts = 0; let totalSuccesses = 0;
   Object.keys(RECIPES).forEach(key => {
     if (key === 'timePearl'    && !gameState.flags.craftingUnlocked)    return;
-    if (key === 'motionPowder' && !gameState.flags.motionPowderUnlocked) return;
+    if (key === 'enhancementPowder' && !gameState.flags.enhancementPowderUnlocked) return;
     if (key === 'rewind'       && !gameState.flags.craftingUnlocked)    return;
     const target = thresholds[key] || 0;
     if (target === 0) return;
     const r = RECIPES[key];
     const sk = c.craftingSkill || 1;
     const cost = Math.max(1, Math.round(r.baseCalcCost - (sk - 1) * 0.8));
-    const getInv = () => key === 'timePearl' ? (gameState.player.inventory.timePearl||0) : key === 'motionPowder' ? (gameState.player.inventory.motionPowder||0) : (gameState.player.inventory.rewind||0);
-    const addInv = () => { if (key === 'timePearl') gameState.player.inventory.timePearl++; else if (key === 'motionPowder') gameState.player.inventory.motionPowder = (gameState.player.inventory.motionPowder||0)+1; else gameState.player.inventory.rewind = (gameState.player.inventory.rewind||0)+1; };
+    const getInv = () => key === 'timePearl' ? (gameState.player.inventory.timePearl||0) : key === 'enhancementPowder' ? (gameState.player.inventory.enhancementPowder||0) : (gameState.player.inventory.rewind||0);
+    const addInv = () => { if (key === 'timePearl') gameState.player.inventory.timePearl++; else if (key === 'enhancementPowder') gameState.player.inventory.enhancementPowder = (gameState.player.inventory.enhancementPowder||0)+1; else gameState.player.inventory.rewind = (gameState.player.inventory.rewind||0)+1; };
     while (getInv() < target) {
       const hasCalc = r.ingredients.every(ing => (gameState.player.orichalchum[ing.type]||0) >= cost);
       if (!hasCalc) break;
@@ -1004,7 +1242,7 @@ function processVeinStation() {
     const ld = VEIN_LEVELS[vein.level];
     if (vein.charged) {
       const [mn,mx] = ld.yieldCautious;
-      const yld = rand(mn, mx);
+      const yld = Math.round(rand(mn, mx) * getVeinYieldMult(vein));
       gameState.player.orichalchum[vein.oreType] = (gameState.player.orichalchum[vein.oreType]||0) + yld;
       vein.charged = false; vein.chargeBlocks = 0;
       totalHarvested += yld;
@@ -1015,7 +1253,7 @@ function processVeinStation() {
       const success = Math.random() < Math.min(0.90, 0.30 + (sk-1)*0.12);
       if (success) {
         vein.devBar = (vein.devBar||0) + (1+sk);
-        if (vein.devBar >= ld.devBarMax && vein.level < 5) levelUpVein(vein);
+        if (vein.devBar >= ld.devBarMax && vein.level < getVeinMaxLevel(vein)) levelUpVein(vein);
         awardContactXP(contactId,'cultivating',20);
         totalCultivated++;
       } else {
@@ -1070,7 +1308,7 @@ function doSell() {
   const items = [];
   ORE_TYPE_KEYS.forEach(k => { const q=ss['ore_'+k]||0; if(q>0) items.push({kind:'ore',type:k,qty:q}); });
   const pq = ss['con_timePearl']||0;    if(pq>0) items.push({kind:'consumable',type:'timePearl',   qty:pq});
-  const mq = ss['con_motionPowder']||0; if(mq>0) items.push({kind:'consumable',type:'motionPowder',qty:mq});
+  const mq = ss['con_enhancementPowder']||0; if(mq>0) items.push({kind:'consumable',type:'enhancementPowder',qty:mq});
   gameState.sellState = {};
   closeModal();
   executeSale(items);
@@ -1093,7 +1331,7 @@ function advanceJamesMotion() {
 }
 function completeJamesMotion() {
   gameState.flags.jamesMotionEventSeen  = true;
-  gameState.flags.motionPowderUnlocked  = true;
+  gameState.flags.enhancementPowderUnlocked  = true;
   gameState.contacts.james.relation = (gameState.contacts.james.relation||0) + 1;
   checkOreGoal(); // may immediately queue home raid if player already has 5+ ore
   gameState.currentScreen = 'home'; renderGame();
@@ -1103,7 +1341,7 @@ function completeJamesMotion() {
 function generateJamesJob() {
   const trust = gameState.contacts.james.relation || 0;
   const recipes = ['timePearl'];
-  if (gameState.flags.motionPowderUnlocked) recipes.push('motionPowder');
+  if (gameState.flags.enhancementPowderUnlocked) recipes.push('enhancementPowder');
   const recipeKey = randFrom(recipes);
   const recipe    = RECIPES[recipeKey];
   // Size scales with trust: trust 0-1=1-3, trust 2-3=3-6, trust 4+=5-10
@@ -1132,11 +1370,11 @@ function fulfillJamesJob() {
   const job = gameState.jamesJob;
   if (!job) return;
   const inv  = gameState.player.inventory;
-  const have = job.recipeKey === 'timePearl' ? inv.timePearl : inv.motionPowder;
+  const have = job.recipeKey === 'timePearl' ? inv.timePearl : inv.enhancementPowder;
   if (have < job.qty) { openModal('james_job_short', { job, have }); return; }
   // Deduct items and pay
   if (job.recipeKey === 'timePearl')    inv.timePearl    -= job.qty;
-  if (job.recipeKey === 'motionPowder') inv.motionPowder -= job.qty;
+  if (job.recipeKey === 'enhancementPowder') inv.enhancementPowder -= job.qty;
   gameState.player.cash += job.totalPay;
   awardRelation('james', 5);
   gameState.flags.jamesJobActive = false;
@@ -1190,7 +1428,7 @@ function executeSale(items) {
       gross += pricePerUnit * item.qty;
       consSold += item.qty;
       if (item.type === 'timePearl')    gameState.player.inventory.timePearl    = Math.max(0, gameState.player.inventory.timePearl    - item.qty);
-      if (item.type === 'motionPowder') gameState.player.inventory.motionPowder = Math.max(0, gameState.player.inventory.motionPowder - item.qty);
+      if (item.type === 'enhancementPowder') gameState.player.inventory.enhancementPowder = Math.max(0, gameState.player.inventory.enhancementPowder - item.qty);
     }
   });
   if (consSold > 0) {
@@ -1304,7 +1542,7 @@ function combatPlayerAttack() {
   if (c.motionTurns > 0) {
     attackCount = c.motionPower >= 3 ? 3 : 2;
     const motionLabel = attackCount === 3 ? 'three times' : 'twice';
-    c.log.push(`Motion powder — you move ${motionLabel} as fast.`);
+    c.log.push(`Enhancement powder — you move ${motionLabel} as fast.`);
   }
 
   for (let i = 0; i < attackCount; i++) {
@@ -1357,10 +1595,10 @@ function combatUseTimePearl() {
 }
 function combatUseMotionPowder() {
   const c = gameState.combat;
-  if (!c.active || c.outcome || gameState.player.inventory.motionPowder <= 0) return;
+  if (!c.active || c.outcome || gameState.player.inventory.enhancementPowder <= 0) return;
   if (c.motionTurns > 0) { c.log.push('Already moving fast. Wait for it to wear off.'); renderGame(); return; }
-  gameState.player.inventory.motionPowder--;
-  const power = getCraftingEffectPower('motionPowder');
+  gameState.player.inventory.enhancementPowder--;
+  const power = getCraftingEffectPower('enhancementPowder');
   // power 1-2 = attack twice for 1-2 turns; power 3 = attack 3x for 2 turns
   c.motionPower  = power;
   c.motionTurns  = power >= 3 ? 2 : 1;
@@ -1372,7 +1610,7 @@ function combatUseItem() {
   if (!c.active || c.outcome) return;
   const p = gameState.player;
   const hasPearl   = (p.inventory.timePearl||0)   > 0;
-  const hasMotion  = (p.inventory.motionPowder||0) > 0;
+  const hasMotion  = (p.inventory.enhancementPowder||0) > 0;
   const hasRewind  = (p.inventory.rewind||0)       > 0;
   const devId      = p.equipment.device;
   const dev        = devId ? (p.devicesCompleted||[]).find(d => d.id === devId) : null;

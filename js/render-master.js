@@ -17,6 +17,8 @@ function renderGame() {
     case 'event_home_raid_intro':   html=renderHomeRaidIntroScreen();   break;
     case 'event_home_raid_debrief': html=renderHomeRaidDebriefScreen(); break;
     case 'world':           html=renderWorldScreen();          break;
+    case 'map':             html=renderMapScreen();            break;
+    case 'event_cultivate_tutorial': html=renderCultivateTutorialScreen(); break;
     case 'property':        html=renderPropertyScreen();       break;
     case 'factions':        html=renderFactionsScreen();       break;
     case 'barometer':       html=renderBarometerScreen();      break;
@@ -32,7 +34,7 @@ function renderGame() {
     case 'combat':           html=renderCombatScreen();         break;
     default: html=`<p style="padding:20px">Unknown screen: ${gameState.currentScreen}</p>`;
   }
-  const NO_NAV = ['title','intro','event_james','event_buyer','event_archie_craft_chat','event_archie_motion','event_james_motion','event_home_raid_intro','event_home_raid_debrief','combat'];
+  const NO_NAV = ['title','intro','event_james','event_buyer','event_archie_craft_chat','event_archie_motion','event_james_motion','event_home_raid_intro','event_home_raid_debrief','event_cultivate_tutorial','combat'];
   const showNav = !NO_NAV.includes(gameState.currentScreen);
   const navHTML = showNav ? renderGlobalNav() : '';
   const spacer  = showNav ? '<div class="global-nav-spacer"></div>' : '';

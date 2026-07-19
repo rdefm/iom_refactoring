@@ -164,6 +164,18 @@ function renderWorldScreen() {
     </div>
     <div style="flex:1;padding:16px 18px;display:flex;flex-direction:column;gap:14px;overflow-y:auto">
 
+      <!-- THE MAP -->
+      <div>
+        <div class="section-label">London</div>
+        <div class="action-card" onclick="navigate('map')" style="border-color:var(--amber)">
+          <div class="action-card-left">
+            <div class="action-card-title">🗺 The Map</div>
+            <div class="action-card-sub">You're in ${DISTRICTS[gameState.player.currentDistrict||HOME_DISTRICT].name} · ${(gameState.world.sites||[]).length} discovered site${(gameState.world.sites||[]).length!==1?'s':''} · travel, prospect, seed</div>
+          </div>
+          <div class="action-card-arrow">›</div>
+        </div>
+      </div>
+
       <!-- BAROMETER -->
       <div>
         <div class="section-label">Global Barometer</div>
@@ -363,7 +375,7 @@ function renderBarometerScreen() {
     const fx      = state.effects || {};
     const chips   = Object.entries(fx).map(([k,v]) => {
       const pos = v > 0;
-      const lbls = { orePrice:'Ore prices', mugChance:'Mugging risk', dailyCost:'Daily costs', searchFind:'Search chance', homeRaid:'Home raid risk', voidPremium:'Void premium', timePremium:'Time premium', energyPremium:'Energy premium', motionPremium:'Motion premium', effectMod:'Effect modifier' };
+      const lbls = { orePrice:'Ore prices', mugChance:'Mugging risk', dailyCost:'Daily costs', searchFind:'Search chance', homeRaid:'Home raid risk', timePremium:'Time premium', physicsPremium:'Physics premium', lifePremium:'Life premium', fatePremium:'Fate premium', emotionPremium:'Emotion premium', effectMod:'Effect modifier' };
       return `<span class="effect-chip ${pos?'neg':'pos'}">${lbls[k]||k} ${(pos?'+':'')+Math.round(v*100)}%</span>`;
     });
     // Show mini-bars for non-active states that have any progress

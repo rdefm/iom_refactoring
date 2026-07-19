@@ -1,6 +1,6 @@
 // Vein — service worker. Network-first with cache fallback: the game always
 // updates when online, and still opens offline once visited.
-const CACHE = 'vein-v1';
+const CACHE = 'vein-v2';
 const PRECACHE = [
   '.',
   'index.html',
@@ -16,6 +16,7 @@ const PRECACHE = [
   'js/save.js',
   'js/render-world.js',
   'js/render-events.js',
+  'js/render-map.js',
   'js/render-craft-combat.js',
   'js/render-master.js',
   'js/main.js',

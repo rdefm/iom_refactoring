@@ -43,7 +43,7 @@ function renderTitleScreen() {
         <div><div>Debug Start</div><span class="title-start-label">All flags · £1m · 3 veins · 20× ore · 5 pearls · Crafting Lv3</span></div><span style="font-size:16px;opacity:0.4">›</span>
       </button>
     </div>
-    <div class="title-version">prototype v0.5</div>
+    <div class="title-version">prototype v0.6 — M1: London Exists</div>
   </div>`;
 }
 
@@ -257,6 +257,8 @@ function renderVeinsScreen() {
         const chargePct = Math.round(((v.chargeBlocks||0) / ld.rechargeBlocks) * 100);
         const devPct    = v.level >= 5 ? 100 : Math.min(100, Math.round(((v.devBar||0) / ld.devBarMax) * 100));
         const devAlmost = devPct >= 75 && v.level < 5;
+        const vd     = veinDistrict(v);
+        const travel = travelBlocksTo(vd);
         return `
           <div class="vein-list-card" onclick="openModal('vein_detail',{veinId:'${v.id}'})">
             <div class="vein-list-card-top">
@@ -265,6 +267,7 @@ function renderVeinsScreen() {
             </div>
             <div class="vein-list-meta">
               <span>${v.charged ? '✅ Ready to harvest' : `⏳ Charging`}</span>
+              <span>📍 ${DISTRICTS[vd].name}${travel ? ` (+${travel})` : ''}</span>
               <span>🔒 ${sec.label}</span>
             </div>
             <div style="margin-top:7px;display:flex;flex-direction:column;gap:6px">
@@ -310,7 +313,14 @@ function renderVeinsScreen() {
           <div class="action-card" onclick="openModal('seed_vein_pick',{})">
             <div class="action-card-left">
               <div class="action-card-title">🌱 Seed a new vein</div>
-              <div class="action-card-sub">Costs ${SEED_ORE_COST} calc · uses 1 time block · ${Math.round(getCultivatingSuccessChance()*100)}% success at Lv${p.cultivatingSkill}</div>
+              <div class="action-card-sub">${(gameState.world.sites||[]).length ? `${(gameState.world.sites||[]).length} discovered site${(gameState.world.sites||[]).length!==1?'s':''} · ${SEED_ORE_COST} calc + 1 block` : `Prospect a district on the map to discover sites first`}</div>
+            </div>
+            <div class="action-card-arrow">›</div>
+          </div>
+          <div class="action-card" onclick="navigate('map')" style="margin-top:6px">
+            <div class="action-card-left">
+              <div class="action-card-title">🗺 Open the map</div>
+              <div class="action-card-sub">Travel · prospect for sites · you're in ${DISTRICTS[gameState.player.currentDistrict||HOME_DISTRICT].name}</div>
             </div>
             <div class="action-card-arrow">›</div>
           </div>
@@ -344,14 +354,14 @@ function renderInventoryScreen() {
 
   // CONSUMABLES TAB
   const pearlCount  = p.inventory.timePearl;
-  const motionCount = p.inventory.motionPowder;
+  const motionCount = p.inventory.enhancementPowder;
   const pearlCard  = pearlCount > 0 ? `<div class="item-card">
     <div class="item-card-top"><div class="item-card-icon">⧖</div><div class="item-card-name">Time Pearl ×${pearlCount}</div></div>
     <div class="item-card-desc">Throw at your feet in combat. Freezes the enemy for ${getCraftingEffectPower('timePearl')} turn${getCraftingEffectPower('timePearl')>1?'s':''}.</div>
   </div>` : '';
   const motionCard = motionCount > 0 ? `<div class="item-card">
-    <div class="item-card-top"><div class="item-card-icon">↯</div><div class="item-card-name">Motion Powder ×${motionCount}</div></div>
-    <div class="item-card-desc">Rub on skin before a fight. Attack ${getCraftingEffectPower('motionPowder')>=3?'three':' twice'} per turn for ${getCraftingEffectPower('motionPowder')>=3?2:1} turn${getCraftingEffectPower('motionPowder')>=3?'s':''}.</div>
+    <div class="item-card-top"><div class="item-card-icon">↯</div><div class="item-card-name">Enhancement Powder ×${motionCount}</div></div>
+    <div class="item-card-desc">Rub on skin before a fight. Attack ${getCraftingEffectPower('enhancementPowder')>=3?'three':' twice'} per turn for ${getCraftingEffectPower('enhancementPowder')>=3?2:1} turn${getCraftingEffectPower('enhancementPowder')>=3?'s':''}.</div>
   </div>` : '';
   const consumHTML = (!pearlCount && !motionCount)
     ? '<div class="inv-empty">No consumables.<br>Craft some to get started.</div>'

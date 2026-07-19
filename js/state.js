@@ -3,6 +3,7 @@
 // ============================================================
 
 const gameState = {
+  __version:      2,
   currentScreen:  'title',
   modal:          null,
   introStep:      0,
@@ -22,9 +23,10 @@ const gameState = {
     hpMax:      100,
     attackMin:  5,
     attackMax:  12,
+    currentDistrict: 'shoreditch',
     orichalchum: {},
     veins:       [],
-    inventory:      { timePearl: 0, motionPowder: 0, rewind: 0 },
+    inventory:      { timePearl: 0, enhancementPowder: 0, rewind: 0 },
     craftingSkill:    1,
     craftingXP:       0,
     cultivatingSkill: 1,
@@ -43,6 +45,8 @@ const gameState = {
     timeBlock:        0,
     timeBlocksDone:   [],
     blocksSinceReset: 0,
+    sites:            [],   // discovered, unclaimed prospecting sites
+    _siteId:          1,
   },
   home: {
     tier:           'bedsit',
@@ -101,7 +105,8 @@ const gameState = {
     consSoldCount:          0,
     archieMotionEventSeen:  false,
     jamesMotionEventSeen:   false,
-    motionPowderUnlocked:   false,
+    enhancementPowderUnlocked: false,
+    cultivateTutorialSeen:  false,
     jamesJobActive:         false,
     _archieMotionPending:   false,
     homeRaidEventPending:   false,

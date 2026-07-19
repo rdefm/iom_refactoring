@@ -31,16 +31,38 @@ mutate it, screens re-render from it (`renderGame()`). The scripts are classic
 
 | File | Contents |
 |---|---|
-| `js/data.js` | Static tables: ore types, recipes, devices, homes, factions, barometer, event card decks |
+| `js/data.js` | Static tables: ore types, recipes, devices, homes, factions, barometer, event card decks, districts, site tiers, district events |
 | `js/state.js` | The `gameState` object (pure data tree — keep it that way, snapshots depend on it) |
-| `js/systems.js` | All game logic: time, veins, crafting, combat, raids, barometer, contacts |
+| `js/systems.js` | All game logic: time, veins, crafting, combat, raids, barometer, contacts, travel, prospecting, sites |
 | `js/render-core.js` | Render helpers + title, intro, home, veins, inventory screens |
-| `js/save.js` | Save slots, autosave, export/import (localStorage) |
+| `js/save.js` | Save slots, versioned migrations, export/import (localStorage) |
 | `js/render-world.js` | Stats, world hub, property, factions, barometer, save/load screens |
 | `js/render-events.js` | Contact/SMS/story event screens |
+| `js/render-map.js` | London map (SVG), district/prospect/district-event modals, cultivating tutorial |
 | `js/render-craft-combat.js` | Crafting screen, combat screen, modals |
 | `js/render-master.js` | `renderGame()` master compositor + global nav |
 | `js/main.js` | Init + service worker registration |
+
+## M1 — "London Exists" (v0.6)
+
+The vision doc's M1 layer, on top of prototype parity:
+
+- **Ore roster v2**: time / physics / life / fate / emotion (energy+motion merged
+  into physics, void dropped). Saves migrate via `migrateSave()` in `js/save.js`
+  — versioned, idempotent; migration #1 buys out void stock for cash.
+- **9 districts + map screen** (`World → The Map`): ore biases, danger, site
+  caps, faction presence; King's Cross recharges veins faster.
+- **Travel rule**: acting in a district you're not in costs +1 time block; you
+  wake at home (Shoreditch) each day.
+- **Prospecting & sites**: prospect a district to discover a site
+  (Barren→Saturated, quality visible before you pay); seeding happens into
+  sites and the site's hospitability becomes the vein's permanent terroir
+  (−1 recharge · +1 max level (Deep Lode) · +15% yield). ~5% of Saturated
+  sites hold a free natural vein. Unclaimed sites get NPC-claimed over time.
+- **District event deck**: 15 cards fired on travel/prospect, weighted by
+  district and danger.
+- **Cultivating tutorial**: Archie walks you through his transferred vein
+  after the home-raid beat.
 
 Conventions to preserve (they're what the vision doc's engine foundations rely
 on): screens never mutate state directly; `gameState` stays a pure data tree

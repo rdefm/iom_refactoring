@@ -542,3 +542,14 @@ const CULTIVATE_TUTORIAL_CARDS = [
   { type:'speaker',   speaker:'Archie', text:`"Bring it to me, same split as ever. Or make pearls out of it, which is better money and worse company. Either way — vein first. Go on. It won't cultivate itself. Believe me, I've waited."` },
   { type:'resolution',label:null, text:`He leaves you with the tea and the arch and a faint sense of having been given both a gift and a job. Under your feet, something old is waiting to be worth something.` },
 ];
+
+// ── FACTION TUBE LINES (map) ─────────────────────────────────
+// Each faction runs a 'line' through its territory; stops are its veins.
+// Soho is always a pass-through: the marketplace consumes, it doesn't produce.
+const FACTION_LINES = {
+  collective: { route:['kingsx','shoreditch','whitechapel','greenwich'], veins:{ kingsx:1, shoreditch:2, whitechapel:2, greenwich:1 } },
+  firm:       { route:['camden','soho','battersea'],                     veins:{ camden:2, battersea:2 } },
+  guild:      { route:['hampstead','kingsx','city','greenwich'],         veins:{ hampstead:2, kingsx:1, city:1, greenwich:2 } },
+  network:    { route:['soho','kingsx','whitechapel'],                   veins:{ kingsx:2, whitechapel:1 } },
+  conclave:   { route:['soho','city'],                                   veins:{ city:2 } },
+};
